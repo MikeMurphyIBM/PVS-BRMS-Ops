@@ -108,21 +108,22 @@ echo ""
 # ------------------------------------------------------------------------------
 # Double-hop SSH connection
 # ------------------------------------------------------------------------------
+
 ssh -i "$VSI_KEY_FILE" \
   -o StrictHostKeyChecking=no \
   -o UserKnownHostsFile=/dev/null \
-  ${SSH_USER}@${VSI_IP} \
-  "ssh -i /home/${SSH_USER}/.ssh/id_ed25519_vsi \
+  murphy@52.118.255.179 \
+  "ssh-keygen -R 192.168.10.35"
+
+ssh -i "$VSI_KEY_FILE" \
+  -o StrictHostKeyChecking=no \
+  -o UserKnownHostsFile=/dev/null \
+  murphy@52.118.255.179 \
+  "ssh -i /home/murphy/.ssh/id_ed25519_vsi \
        -o StrictHostKeyChecking=no \
        -o UserKnownHostsFile=/dev/null \
-       ${SSH_USER}@${IBMI_IP} \
-       'echo \"Successfully connected to IBMi LPAR at ${IBMI_IP}\"'" || {
-    echo "✗ ERROR: SSH connection failed"
-    exit 1
-}
-
-echo "✓ SSH connection successful"
-echo ""
+       murphy@192.168.10.35 \
+       'echo Successfully connected to IBMi'"  
 
 echo "------------------------------------------------------------------------"
 echo " Stage 2 Complete: Connected to IBMi LPAR"
