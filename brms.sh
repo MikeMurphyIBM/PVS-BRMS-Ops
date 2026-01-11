@@ -76,14 +76,14 @@ echo "  ✓ VSI SSH key installed"
 # ------------------------------------------------------------------------------
 # IBMi SSH Key (ED25519)
 # ------------------------------------------------------------------------------
-IBMI_KEY_FILE="$HOME/.ssh/id_ed25519_vsi"
+IBMI_KEY_FILE="$HOME/.ssh/id_ed25519"
 
-if [ -z "${id_ed25519_vsi:-}" ]; then
-  echo "✗ ERROR: id_ed25519_vsi environment variable is not set"
+if [ -z "${id_ed25519:-}" ]; then
+  echo "✗ ERROR: id_ed25519 environment variable is not set"
   exit 1
 fi
 
-echo "$id_ed25519_vsi" > "$IBMI_KEY_FILE"
+echo "$id_ed25519" > "$IBMI_KEY_FILE"
 chmod 600 "$IBMI_KEY_FILE"
 echo "  ✓ IBMi SSH key installed"
 
@@ -119,7 +119,7 @@ ssh -i "$VSI_KEY_FILE" \
   -o StrictHostKeyChecking=no \
   -o UserKnownHostsFile=/dev/null \
   murphy@52.118.255.179 \
-  "ssh -i /home/murphy/.ssh/id_ed25519_vsi \
+  "ssh -i /home/murphy/.ssh/id_ed25519 \
        -o StrictHostKeyChecking=no \
        -o UserKnownHostsFile=/dev/null \
        murphy@192.168.10.35 \
