@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 
 ################################################################################
-# IBMi SSH Connection Test Script - FULL TEST
-# Purpose: Verify Code Engine → VSI → IBMi double-hop connection
+# IBMi SSH Connection Test Script
+# Purpose: Establish double-hop SSH connection to IBMi LPAR via VSI jump host
 # Dependencies: SSH keys stored as Code Engine secrets
 ################################################################################
 
@@ -26,8 +26,8 @@ set -eu
 ################################################################################
 echo ""
 echo "========================================================================"
-echo " FULL TEST: CODE ENGINE → VSI → IBMi"
-echo " Purpose: Verify complete double-hop SSH connectivity"
+echo " IBMi SSH CONNECTION TEST v3"
+echo " Purpose: Verify double-hop SSH connectivity to IBMi LPAR"
 echo "========================================================================"
 echo ""
 
@@ -37,7 +37,7 @@ echo ""
 
 # Network Configuration
 readonly VSI_IP="52.118.255.179"          # Jump host with public IP
-readonly IBMI_IP="192.168.0.33"           # IBMi LPAR on private network
+readonly IBMI_IP="192.168.0.33"           # IBMi LPAR on private network (SOURCE)
 readonly SSH_USER="murphy"                # Username for both VSI and IBMi
 
 echo "Configuration loaded successfully."
@@ -74,7 +74,7 @@ chmod 600 "$VSI_KEY_FILE"
 echo "  ✓ VSI SSH key installed"
 
 # ------------------------------------------------------------------------------
-# IBMi SSH Key (same as VSI key for this setup)
+# IBMi SSH Key (ED25519)
 # ------------------------------------------------------------------------------
 IBMI_KEY_FILE="$HOME/.ssh/id_ed25519_vsi"
 
@@ -135,6 +135,9 @@ echo "→ Establishing double-hop SSH connection..."
 echo "  Route: Code Engine → VSI (${VSI_IP}) → IBMi (${IBMI_IP})"
 echo ""
 
+# ------------------------------------------------------------------------------
+# Double-hop SSH connection
+# ------------------------------------------------------------------------------
 ssh -i "$VSI_KEY_FILE" \
   -o StrictHostKeyChecking=no \
   -o UserKnownHostsFile=/dev/null \
@@ -167,7 +170,7 @@ echo "========================================================================"
 echo ""
 echo "  Status:           ✓ SUCCESS"
 echo "  VSI Jump Host:    ${VSI_IP}"
-echo "  IBMi LPAR:        ${IBMI_IP}"
+echo "  IBMi LPAR:        ${IBMI_IP} (SOURCE)"
 echo "  SSH User:         ${SSH_USER}"
 echo "  Connection Path:  Code Engine → VSI → IBMi"
 echo ""
