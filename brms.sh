@@ -26,7 +26,7 @@ set -eu
 ################################################################################
 echo ""
 echo "========================================================================"
-echo " IBMi SSH CONNECTION TEST v3"
+echo " IBMi SSH CONNECTION TEST v4"
 echo " Purpose: Verify double-hop SSH connectivity to IBMi LPAR"
 echo "========================================================================"
 echo ""
@@ -146,7 +146,7 @@ ssh -i "$VSI_KEY_FILE" \
        -o StrictHostKeyChecking=no \
        -o UserKnownHostsFile=/dev/null \
        ${SSH_USER}@${IBMI_IP} \
-       'echo \"Connected to IBMi\" && hostname && whoami'" || {
+       'echo \"Connected to IBMi\"'" || {
     echo "✗ ERROR: Double-hop SSH connection failed"
     exit 1
 }
