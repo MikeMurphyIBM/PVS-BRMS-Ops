@@ -26,7 +26,7 @@ set -eu
 ################################################################################
 echo ""
 echo "========================================================================"
-echo " JOB 3: BRMS BACKUP OPERATIONS v2"
+echo " JOB 3: BRMS BACKUP OPERATIONS v3"
 echo " Purpose: Execute cloud backups and synchronize BRMS history"
 echo "========================================================================"
 echo ""
@@ -131,7 +131,7 @@ ssh -i "$VSI_KEY_FILE" \
        -o StrictHostKeyChecking=no \
        -o UserKnownHostsFile=/dev/null \
        ${SSH_USER}@${IBMI_CLONE_IP} \
-       'system \"CALL PGM(QBRM/Q1AOLD) PARM('\"'\"'NUMOPTVOLS'\"'\"' '\"'\"'*SET      '\"'\"' '\"'\"'75'\"'\"')\"'" || {
+       \"system \\\"CALL PGM(QBRM/Q1AOLD) PARM('NUMOPTVOLS' '*SET      ' '75')\\\"\"" || {
     echo "✗ ERROR: Failed to set NUMOPTVOLS"
     exit 1
 }
@@ -173,7 +173,7 @@ ssh -i "$VSI_KEY_FILE" \
        -o StrictHostKeyChecking=no \
        -o UserKnownHostsFile=/dev/null \
        ${SSH_USER}@${IBMI_CLONE_IP} \
-       'system \"CALL QBRM/Q1AOLD PARM('\"'\"'BRMSYSNAME'\"'\"' '\"'\"'*SET      '\"'\"' '\"'\"'MCLONE'\"'\"')\"'" || {
+       \"system \\\"CALL QBRM/Q1AOLD PARM('BRMSYSNAME' '*SET      ' 'MCLONE')\\\"\"" || {
     echo "✗ ERROR: Failed to set BRMS system name to MCLONE"
     exit 1
 }
@@ -215,7 +215,7 @@ ssh -i "$VSI_KEY_FILE" \
        -o StrictHostKeyChecking=no \
        -o UserKnownHostsFile=/dev/null \
        ${SSH_USER}@${IBMI_CLONE_IP} \
-       'system \"CALL QBRM/Q1AOLD PARM('\"'\"'BRMSYSNAME'\"'\"' '\"'\"'*SET      '\"'\"' '\"'\"'MURPHYXP'\"'\"')\"'" || {
+       \"system \\\"CALL QBRM/Q1AOLD PARM('BRMSYSNAME' '*SET      ' 'MURPHYXP')\\\"\"" || {
     echo "✗ ERROR: Failed to set BRMS system name to MURPHYXP"
     exit 1
 }
@@ -823,3 +823,4 @@ echo "========================================================================"
 echo ""
 
 exit 0
+
