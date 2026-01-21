@@ -139,7 +139,7 @@ ssh -i "$VSI_KEY_FILE" \
        -o StrictHostKeyChecking=no \
        -o UserKnownHostsFile=/dev/null \
        ${SSH_USER}@${IBMI_CLONE_IP} \
-       \"system \\\"CALL PGM(QBRM/Q1AOLD) PARM('NUMOPTVOLS' '*SET      ' '75')\\\"\"" || {
+       'system \"CALL PGM(QBRM/Q1AOLD) PARM(\'\''NUMOPTVOLS'\'' \'\''*SET \'' \'\''75'\'')\"'" || {
     echo "✗ ERROR: Failed to set NUMOPTVOLS"
     exit 1
 }
