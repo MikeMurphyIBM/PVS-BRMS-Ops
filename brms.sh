@@ -131,6 +131,16 @@ echo "→ [STEP 1] Setting number of optical volumes to 75..."
 # Note: '*SET      ' contains 6 spaces to pad the parameter to 10 characters.
 # This ensures the program call interprets the string correctly.
 
+# ------------------------------------------------------------------------------
+# STEP 1: Set Optical Volumes (Clone LPAR)
+# ------------------------------------------------------------------------------
+echo "→ [STEP 1] Setting number of optical volumes to 75..."
+
+# Fix: 
+# 1. Export PATH to ensure the 'system' utility is found (/QOpenSys/usr/bin).
+# 2. Use escaped double quotes \"...\" for the system command string.
+# 3. Use 2>&1 to capture any shell errors (like 'command not found') to the log.
+
 ssh -i "$VSI_KEY_FILE" \
   -o StrictHostKeyChecking=no \
   -o UserKnownHostsFile=/dev/null \
@@ -139,7 +149,8 @@ ssh -i "$VSI_KEY_FILE" \
        -o StrictHostKeyChecking=no \
        -o UserKnownHostsFile=/dev/null \
        ${SSH_USER}@${IBMI_CLONE_IP} \
-       \"system -v \\\"CALL PGM(QBRM/Q1AOLD) PARM('NUMOPTVOLS' '*SET ' '75')\\\"\"" || {
+       'export PATH=/QOpenSys/pkgs/bin:/QOpenSys/usr/bin:/usr/bin:\$PATH; \
+        system -v \"CALL PGM(QBRM/Q1AOLD) PARM('\''NUMOPTVOLS'\'' '\''*SET '\'' '\''75'\'')\" 2>&1'" || {
     echo "✗ ERROR: Failed to set NUMOPTVOLS"
     exit 1
 }
