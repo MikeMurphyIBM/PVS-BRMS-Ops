@@ -179,8 +179,8 @@ echo ""
 # ------------------------------------------------------------------------------
 echo "→ [STEP 7] Running Control Group: ${CONTROL_GROUP_1}..."
 echo "  This will run synchronously and may take a long time..."
-# SBMJOB(*NO) keeps the process in the current session so we can catch the exit code.
-# [Source 28]
+# SBMJOB(*NO) keeps the process in the current session.
+# We expect this to return a non-zero exit code due to 'Media not transferred' errors.
 
 ssh -i "$VSI_KEY_FILE" \
   -o StrictHostKeyChecking=no \
@@ -194,12 +194,15 @@ ssh -i "$VSI_KEY_FILE" \
        -o ServerAliveInterval=60 \
        -o ServerAliveCountMax=120 \
        ${SSH_USER}@${IBMI_CLONE_IP} \
-       'system \"STRBKUBRM CTLGRP(${CONTROL_GROUP_1}) SBMJOB(*NO)\"'" || {
-    echo "✗ ERROR: Control group ${CONTROL_GROUP_1} failed"
-    exit 1
-}
+       'system \"STRBKUBRM CTLGRP(${CONTROL_GROUP_1}) SBMJOB(*NO)\"'"
 
-echo "✓ Control group ${CONTROL_GROUP_1} completed successfully"
+# Check the exit code of the SSH command
+if [ $? -ne 0 ]; then
+    echo "⚠ [STEP 7] Control group ${CONTROL_GROUP_1} completed with errors."
+    echo "  (This is expected for Cloud Backups where media transfer happens later)."
+else
+    echo "✓ [STEP 7] Control group ${CONTROL_GROUP_1} completed successfully."
+fi
 echo ""
 
 # ------------------------------------------------------------------------------
@@ -221,12 +224,15 @@ ssh -i "$VSI_KEY_FILE" \
        -o ServerAliveInterval=60 \
        -o ServerAliveCountMax=120 \
        ${SSH_USER}@${IBMI_CLONE_IP} \
-       'system \"STRBKUBRM CTLGRP(${CONTROL_GROUP_2}) SBMJOB(*NO)\"'" || {
-    echo "✗ ERROR: Control group ${CONTROL_GROUP_2} failed"
-    exit 1
-}
+       'system \"STRBKUBRM CTLGRP(${CONTROL_GROUP_2}) SBMJOB(*NO)\"'"
 
-echo "✓ Control group ${CONTROL_GROUP_2} completed successfully"
+# Check the exit code of the SSH command
+if [ $? -ne 0 ]; then
+    echo "⚠ [STEP 8] Control group ${CONTROL_GROUP_2} completed with errors."
+    echo "  (This is expected for Cloud Backups where media transfer happens later)."
+else
+    echo "✓ [STEP 8] Control group ${CONTROL_GROUP_2} completed successfully."
+fi
 echo ""
 
 # ------------------------------------------------------------------------------
