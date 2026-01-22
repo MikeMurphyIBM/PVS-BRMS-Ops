@@ -135,61 +135,55 @@ echo ""
 # ------------------------------------------------------------------------------
 echo "→ [STEP 10] Polling for transfer completion..."
 
-# Retry loop parameters
-MAX_RETRIES=20
-SLEEP_SECONDS=60
+# Configuration: Check every 5 minutes (300s), up to 288 times (24 hours total)
+MAX_RETRIES=288
+SLEEP_SECONDS=300
 COUNT=0
 
 while [ $COUNT -lt $MAX_RETRIES ]; do
     echo "  Poll attempt $((COUNT+1))/${MAX_RETRIES}: Checking for remaining transfers..."
 
-    # Define the remote command string.
-    # 1. DLTF: Delete temp file if it exists (redirect output to null to ignore 'not found' errors)
-    # 2. CRTPF: Manually create the physical file (Required because CPYSPLF cannot create it)
-    # 3. WRKMEDBRM: Generate the report to spool
-    # 4. CPYSPLF: Copy spool to the physical file we just created
-    # 5. CPYTOIMPF: Convert to stream file for grepping
-    # 6. grep: Count lines with '*TRF'. Returns the number.
-    
-    # We use > /dev/null on the setup commands so they don't pollute the PENDING_COUNT variable.
-    
+    # Define the remote command to check status silently
+    # We use 'tr -d' to clean up the output ensuring we get a clean number for the logic check
     REMOTE_CMD="system 'DLTF FILE(QTEMP/CHECKTRF)' > /dev/null 2>&1 ; \
-                system 'CRTPF FILE(QTEMP/CHECKTRF) RCDLEN(198)' > /dev/null ; \
-                system 'WRKMEDBRM TYPE(*TRF) OUTPUT(*PRINT)' > /dev/null ; \
-                system 'CPYSPLF FILE(QP1AMM) TOFILE(QTEMP/CHECKTRF) JOB(*) SPLNBR(*LAST)' > /dev/null ; \
-                system 'CPYTOIMPF FROMFILE(QTEMP/CHECKTRF) TOSTMF('\'/tmp/trf.txt\'') MBROPT(*REPLACE) RCDDLM(*LF)' > /dev/null ; \
+                system 'CRTPF FILE(QTEMP/CHECKTRF) RCDLEN(198)' > /dev/null 2>&1 ; \
+                system 'WRKMEDBRM TYPE(*TRF) OUTPUT(*PRINT)' > /dev/null 2>&1 ; \
+                system 'CPYSPLF FILE(QP1AMM) TOFILE(QTEMP/CHECKTRF) JOB(*) SPLNBR(*LAST)' > /dev/null 2>&1 ; \
+                system 'CPYTOIMPF FROMFILE(QTEMP/CHECKTRF) TOSTMF('\'/tmp/trf.txt\'') MBROPT(*REPLACE) RCDDLM(*LF)' > /dev/null 2>&1 ; \
                 grep -c '*TRF' /tmp/trf.txt"
 
-    # Run SSH. If grep finds nothing or fails, echo "0" to prevent script crash.
+    # Execute SSH. If it fails (connection blip), echo "999" to force a retry rather than crashing.
     PENDING_COUNT=$(ssh -i "$VSI_KEY_FILE" \
       -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \
       ${SSH_USER}@${VSI_IP} \
       "ssh -i /home/${SSH_USER}/.ssh/id_ed25519_vsi \
            -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \
            ${SSH_USER}@${IBMI_CLONE_IP} \
-           \"$REMOTE_CMD\"" || echo "0")
+           \"$REMOTE_CMD\"" || echo "999")
 
-    # Clean up output (remove any potential whitespace/newlines) to ensure integer comparison works
+    # Sanitize output (remove whitespace/newlines)
     PENDING_COUNT=$(echo "$PENDING_COUNT" | tr -d '[:space:]')
 
-    # Basic validation: ensure PENDING_COUNT is actually a number. If not, default to 1 to force retry.
-    if ! [[ "$PENDING_COUNT" =~ ^[1-9]+$ ]]; then
-        echo "  ⚠ Warning: Received invalid response from polling ('$PENDING_COUNT'). Retrying..."
-        PENDING_COUNT=1
+    # Validate we got a number
+    if ! [[ "$PENDING_COUNT" =~ ^[4-12]+$ ]]; then
+        echo "  ⚠ Warning: Received invalid response ('$PENDING_COUNT'). Retrying in ${SLEEP_SECONDS}s..."
+        PENDING_COUNT=999
     fi
 
+    # Check logic
     if [ "$PENDING_COUNT" -eq "0" ]; then
-        echo "✓ Transfers complete. No volumes found with *TRF status."
+        echo "✓ Transfers complete. (Volumes in *TRF state: 0)"
         break
     else
-        echo "  ... Transfers still in progress ($PENDING_COUNT volumes remaining). Waiting ${SLEEP_SECONDS}s..."
+        echo "  ... Transfers still in progress. Volumes remaining: $PENDING_COUNT."
+        echo "      Waiting ${SLEEP_SECONDS}s before next check..."
         sleep $SLEEP_SECONDS
         COUNT=$((COUNT+1))
     fi
 done
 
 if [ $COUNT -eq $MAX_RETRIES ]; then
-    echo "✗ Timeout waiting for transfers to complete."
+    echo "✗ Timeout waiting for transfers to complete (exceeded 24 hours)."
     exit 1 
 fi
 echo ""
