@@ -26,7 +26,7 @@ set -eu
 ################################################################################
 echo ""
 echo "========================================================================"
-echo " JOB 3: BRMS BACKUP OPERATIONS v10"
+echo " JOB 3: BRMS BACKUP OPERATIONS v14"
 echo " Purpose: Execute cloud backups and synchronize BRMS history"
 echo "========================================================================"
 echo ""
@@ -142,10 +142,8 @@ COUNT=0
 while [ $COUNT -lt $MAX_RETRIES ]; do
     echo "  Poll attempt $((COUNT+1))/${MAX_RETRIES}: Checking for remaining transfers..."
 
-    # Define the remote command using SINGLE QUOTES for the system calls.
-    # This prevents 'syntax error near unexpected token' issues in the double-hop SSH.
-    # Note: Inside the system '...' string, we use '' (double single quotes) for the file path.
-    
+    # Remote command to check status silently. 
+    # Uses single quotes for IBM i commands and double-single quotes ('') for internal string literals.
     REMOTE_CMD="rm -f /tmp/trf.txt; \
                 system 'DLTF FILE(QTEMP/CHECKTRF)' > /dev/null 2>&1 ; \
                 system 'CRTPF FILE(QTEMP/CHECKTRF) RCDLEN(198)' > /dev/null 2>&1 ; \
@@ -154,8 +152,7 @@ while [ $COUNT -lt $MAX_RETRIES ]; do
                 system 'CPYTOIMPF FROMFILE(QTEMP/CHECKTRF) TOSTMF(''/tmp/trf.txt'') MBROPT(*REPLACE) RCDDLM(*LF)' > /dev/null 2>&1 ; \
                 if [ -f /tmp/trf.txt ]; then grep -c '*TRF' /tmp/trf.txt; else echo '0'; fi"
 
-    # Execute SSH via the VSI jump host
-    # We wrap the inner command in \"...\" so it passes through the first SSH cleanly.
+    # Execute SSH. 
     PENDING_COUNT=$(ssh -i "$VSI_KEY_FILE" \
       -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \
       ${SSH_USER}@${VSI_IP} \
@@ -164,15 +161,16 @@ while [ $COUNT -lt $MAX_RETRIES ]; do
            ${SSH_USER}@${IBMI_CLONE_IP} \
            \"$REMOTE_CMD\"" || echo "999")
 
-    # Sanitize output (remove spaces/newlines)
+    # Sanitize output (remove whitespace/newlines)
     PENDING_COUNT=$(echo "$PENDING_COUNT" | tr -d '[:space:]')
 
-    # Validation: Ensure result is a number
+    # Validate we got a number (Fixed Regex: ^[1-9]+$)
     if ! [[ "$PENDING_COUNT" =~ ^[1-9]+$ ]]; then
         echo "  ⚠ Warning: Received invalid response ('$PENDING_COUNT'). Retrying in ${SLEEP_SECONDS}s..."
         PENDING_COUNT=999
     fi
 
+    # Check logic
     if [ "$PENDING_COUNT" -eq "0" ]; then
         echo "✓ Transfers complete. (Volumes in *TRF state: 0)"
         break
@@ -185,7 +183,7 @@ while [ $COUNT -lt $MAX_RETRIES ]; do
 done
 
 if [ $COUNT -eq $MAX_RETRIES ]; then
-    echo "✗ Timeout waiting for transfers to complete."
+    echo "✗ Timeout waiting for transfers to complete (exceeded 24 hours)."
     exit 1 
 fi
 echo ""
