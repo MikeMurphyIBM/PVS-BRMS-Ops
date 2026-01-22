@@ -130,70 +130,49 @@ echo ""
 # ------------------------------------------------------------------------------
 # STEP 10: Poll for Transfer Completion (5 min interval, 15 attempts max)
 # ------------------------------------------------------------------------------
-echo "→ [STEP 10] Polling for transfer completion to COS..."
-echo "  Poll interval: ${POLL_INTERVAL} seconds (5 minutes)"
-echo "  Max attempts: ${MAX_POLL_ATTEMPTS}"
-echo ""
+# ------------------------------------------------------------------------------
+# STEP 10: Poll for Transfer Completion
+# ------------------------------------------------------------------------------
+echo "→ [STEP 10] Polling for transfer completion..."
 
-TRANSFER_COMPLETE=0
-POLL_COUNT=0
-VOLUMES_IN_TRANSFER=""
+# Retry loop parameters
+MAX_RETRIES=20
+SLEEP_SECONDS=60
+COUNT=0
 
-while [ $POLL_COUNT -lt $MAX_POLL_ATTEMPTS ]; do
-    POLL_COUNT=$((POLL_COUNT + 1))
-    echo "  Poll attempt ${POLL_COUNT}/${MAX_POLL_ATTEMPTS}: Checking transfer queue..."
-    
-    # WRKMEDBRM TYPE(*TRF) lists volumes currently in transfer or queued.
-    # If the list is empty, the transfer is complete [Source 1: 31-32].
-    OUTPUT=$(ssh -i "$VSI_KEY_FILE" \
-      -o StrictHostKeyChecking=no \
-      -o UserKnownHostsFile=/dev/null \
+while [ $COUNT -lt $MAX_RETRIES ]; do
+    echo "  Poll attempt $((COUNT+1))/${MAX_RETRIES}: Checking for remaining transfers..."
+
+    # Run WRKMEDBRM to list volumes in transfer status (*TRF).
+    # We use grep to count lines. 
+    # '|| true' ensures the script doesn't crash if grep finds nothing (which is actually good here!)
+    PENDING_COUNT=$(ssh -i "$VSI_KEY_FILE" \
+      -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \
       ${SSH_USER}@${VSI_IP} \
       "ssh -i /home/${SSH_USER}/.ssh/id_ed25519_vsi \
-           -o StrictHostKeyChecking=no \
-           -o UserKnownHostsFile=/dev/null \
+           -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \
            ${SSH_USER}@${IBMI_CLONE_IP} \
-           'system \"WRKMEDBRM TYPE(*TRF)\"'" 2>&1)
-    
-    # Check if output indicates no media (transfer queue empty)
-    # Note: 'No media' is the standard message text when the list is empty.
-    if echo "$OUTPUT" | grep -qi "No media"; then
-        echo "✓ Transfer queue is empty - all uploads complete"
-        TRANSFER_COMPLETE=1
+           'system \"WRKMEDBRM TYPE(*TRF) OUTPUT(*PRINT)\" ; cp /QSYSPRT/QSYSPRT.FILE/QSPL.MBR /tmp/trf.txt ; cat /tmp/trf.txt'" \
+           | grep -c "QCLD" || true)
+
+    # Note: Adjust "QCLD" to match your volume prefix or control group name if needed. 
+    # If WRKMEDBRM is empty, it usually says "No media met search criteria", so grep count will be low/zero.
+
+    if [ "$PENDING_COUNT" -eq "0" ]; then
+        echo "✓ Transfers complete. No volumes remaining in *TRF state."
         break
     else
-        if [ $POLL_COUNT -lt $MAX_POLL_ATTEMPTS ]; then
-            echo "  Volumes still transferring - waiting 5 minutes..."
-            
-            # Extract volume names currently in transfer (Lines containing *TRF)
-            ACTIVE_VOLS=$(echo "$OUTPUT" | grep "\*TRF" | awk '{print $1}' | tr -d '\r')
-            
-            if [ -n "$ACTIVE_VOLS" ]; then
-                echo "  > Currently transferring the following volumes:"
-                echo "$ACTIVE_VOLS" | sed 's/^/    - /'
-                
-                # Store last known list for completion summary
-                VOLUMES_IN_TRANSFER="$ACTIVE_VOLS"
-            else
-                echo "  > (Transfer in progress, but unable to parse specific volume IDs)"
-            fi
-            
-            sleep $POLL_INTERVAL
-        fi
+        echo "  ... Transfers still in progress (approx $PENDING_COUNT items found). Waiting ${SLEEP_SECONDS}s..."
+        sleep $SLEEP_SECONDS
+        COUNT=$((COUNT+1))
     fi
 done
 
-if [ $TRANSFER_COMPLETE -eq 0 ]; then
-    echo "✗ ERROR: Transfer did not complete within ${MAX_POLL_ATTEMPTS} attempts"
-    exit 1
+if [ $COUNT -eq $MAX_RETRIES ]; then
+    echo "✗ Timeout waiting for transfers to complete."
+    # Decide if you want to exit 1 here or proceed with a warning
+    exit 1 
 fi
-
-# Count total volumes transferred
-VOLUME_COUNT=0
-if [ -n "$VOLUMES_IN_TRANSFER" ]; then
-    VOLUME_COUNT=$(echo "$VOLUMES_IN_TRANSFER" | wc -l)
-fi
-
 echo ""
 
 # ------------------------------------------------------------------------------
