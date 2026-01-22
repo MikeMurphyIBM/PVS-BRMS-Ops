@@ -124,39 +124,7 @@ echo " Target: ${IBMI_CLONE_IP}"
 echo "========================================================================"
 echo ""
 
-# ------------------------------------------------------------------------------
-# STEP 1: Set Number of Optical Volumes
-# ------------------------------------------------------------------------------
-echo "→ [STEP 1] Setting number of optical volumes to 75..."
-# Note: '*SET      ' contains 6 spaces to pad the parameter to 10 characters.
-# This ensures the program call interprets the string correctly.
 
-# ------------------------------------------------------------------------------
-# STEP 1: Set Optical Volumes (Clone LPAR)
-# ------------------------------------------------------------------------------
-echo "→ [STEP 1] Setting number of optical volumes to 75..."
-
-# Fix: 
-# 1. Export PATH to ensure the 'system' utility is found (/QOpenSys/usr/bin).
-# 2. Use escaped double quotes \"...\" for the system command string.
-# 3. Use 2>&1 to capture any shell errors (like 'command not found') to the log.
-
-ssh -i "$VSI_KEY_FILE" \
-  -o StrictHostKeyChecking=no \
-  -o UserKnownHostsFile=/dev/null \
-  ${SSH_USER}@${VSI_IP} \
-  "ssh -i /home/${SSH_USER}/.ssh/id_ed25519_vsi \
-       -o StrictHostKeyChecking=no \
-       -o UserKnownHostsFile=/dev/null \
-       ${SSH_USER}@${IBMI_CLONE_IP} \
-       'export PATH=/QOpenSys/pkgs/bin:/QOpenSys/usr/bin:/usr/bin:\$PATH; \
-        system -v \"CALL PGM(QBRM/Q1AOLD) PARM('\''NUMOPTVOLS'\'' '\''*SET '\'' '\''75'\'')\" 2>&1'" || {
-    echo "✗ ERROR: Failed to set NUMOPTVOLS"
-    exit 1
-}
-
-echo "✓ Number of optical volumes set to 75"
-echo ""
 
 # ------------------------------------------------------------------------------
 # STEP 2: Set BRMS State to Start Backup
@@ -181,76 +149,6 @@ ssh -i "$VSI_KEY_FILE" \
 echo "✓ BRMS state set to *STRBKU"
 echo ""
 
-# ------------------------------------------------------------------------------
-# STEP 3: Set Temporary BRMS System Name (MCLONE)
-# ------------------------------------------------------------------------------
-echo "→ [STEP 3] Setting temporary BRMS system name to MCLONE..."
-# We temporarily set the BRMS name to MCLONE to differentiate it from the source
-# before running the initialization in Step 4 [Source 560].
-
-ssh -i "$VSI_KEY_FILE" \
-  -o StrictHostKeyChecking=no \
-  -o UserKnownHostsFile=/dev/null \
-  ${SSH_USER}@${VSI_IP} \
-  "ssh -i /home/${SSH_USER}/.ssh/id_ed25519_vsi \
-       -o StrictHostKeyChecking=no \
-       -o UserKnownHostsFile=/dev/null \
-       ${SSH_USER}@${IBMI_CLONE_IP} \
-       \"system \\\"CALL QBRM/Q1AOLD PARM('BRMSYSNAME' '*SET      ' 'MCLONE')\\\"\"" || {
-    echo "✗ ERROR: Failed to set BRMS system name to MCLONE"
-    exit 1
-}
-
-echo "✓ BRMS system name set to MCLONE"
-echo ""
-
-# ------------------------------------------------------------------------------
-# STEP 4: Change System Network Attributes to Local
-# ------------------------------------------------------------------------------
-echo "→ [STEP 4] Changing system network attributes to *LCL..."
-# This command updates the BRMS database to associate the history of the 
-# 'Previous System' (Source) with the current local system (*LCL).
-# Note: Ensure 'APPN' matches your system's LCLNETID (Local Network ID) [Source 218].
-
-ssh -i "$VSI_KEY_FILE" \
-  -o StrictHostKeyChecking=no \
-  -o UserKnownHostsFile=/dev/null \
-  ${SSH_USER}@${VSI_IP} \
-  "ssh -i /home/${SSH_USER}/.ssh/id_ed25519_vsi \
-       -o StrictHostKeyChecking=no \
-       -o UserKnownHostsFile=/dev/null \
-       ${SSH_USER}@${IBMI_CLONE_IP} \
-       'system \"INZBRM OPTION(*CHGSYSNAM) PRVSYSNAM(APPN.MURPHYXP) NEWSYSNAM(*LCL)\"'" || {
-    echo "✗ ERROR: Failed to change system network attributes"
-    exit 1
-}
-
-echo "✓ System network attributes changed to *LCL"
-echo ""
-
-# ------------------------------------------------------------------------------
-# STEP 5: Set BRMS System Name to MURPHYXP
-# ------------------------------------------------------------------------------
-echo "→ [STEP 5] Setting BRMS system name to MURPHYXP..."
-# By setting the BRMS name back to the source name (MURPHYXP), any backup 
-# performed by this clone will be recorded in history as if it were 
-# performed by the production system [Source 560].
-
-ssh -i "$VSI_KEY_FILE" \
-  -o StrictHostKeyChecking=no \
-  -o UserKnownHostsFile=/dev/null \
-  ${SSH_USER}@${VSI_IP} \
-  "ssh -i /home/${SSH_USER}/.ssh/id_ed25519_vsi \
-       -o StrictHostKeyChecking=no \
-       -o UserKnownHostsFile=/dev/null \
-       ${SSH_USER}@${IBMI_CLONE_IP} \
-       \"system \\\"CALL QBRM/Q1AOLD PARM('BRMSYSNAME' '*SET      ' 'MURPHYXP')\\\"\"" || {
-    echo "✗ ERROR: Failed to set BRMS system name to MURPHYXP"
-    exit 1
-}
-
-echo "✓ BRMS system name set to MURPHYXP"
-echo ""
 
 # ------------------------------------------------------------------------------
 # STEP 6: Start ICC/COS Subsystem
@@ -802,10 +700,8 @@ echo "  Status:              ✓ SUCCESS"
 echo "  ────────────────────────────────────────────────────────────────"
 echo ""
 echo "  CLONE LPAR OPERATIONS (${IBMI_CLONE_IP})"
-echo "    • Optical Volumes:      75"
 echo "    • BRMS State:           *STRBKU → *ENDBKU" 
 # This indicates the clone has finished its backup role [Source 483].
-echo "    • System Name:          MCLONE → MURPHYXP"
 echo "    • Control Group 1:      ${CONTROL_GROUP_1} ✓"
 echo "    • Control Group 2:      ${CONTROL_GROUP_2} ✓"
 echo "    • BRMS Maintenance:     MOVMED(*YES) ✓"
