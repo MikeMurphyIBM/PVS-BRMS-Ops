@@ -178,10 +178,12 @@ echo ""
 # STEP 7: Run First Control Group (QCLDCUSR01)
 # ------------------------------------------------------------------------------
 echo "→ [STEP 7] Running Control Group: ${CONTROL_GROUP_1}..."
-echo "  This will run synchronously and may take a long time..."
-# SBMJOB(*NO) keeps the process in the current session.
-# We expect this to return a non-zero exit code due to 'Media not transferred' errors.
 
+# Initialize variable (good practice with set -u)
+RETVAL=0
+
+# Run SSH. If it fails (non-zero), '||' catches it and assigns the code to RETVAL.
+# This prevents 'set -e' from killing the script.
 ssh -i "$VSI_KEY_FILE" \
   -o StrictHostKeyChecking=no \
   -o UserKnownHostsFile=/dev/null \
@@ -194,11 +196,16 @@ ssh -i "$VSI_KEY_FILE" \
        -o ServerAliveInterval=60 \
        -o ServerAliveCountMax=120 \
        ${SSH_USER}@${IBMI_CLONE_IP} \
-       'system \"STRBKUBRM CTLGRP(${CONTROL_GROUP_1}) SBMJOB(*NO)\"'"
+       'system \"STRBKUBRM CTLGRP(${CONTROL_GROUP_1}) SBMJOB(*NO)\"'" || RETVAL=$?
 
-if [ $? -ne 0 ]; then
-    echo "⚠️ Backup completed with errors (likely 'Media Not Transferred'). Proceeding..."
+# Now analyze the captured return code
+if [ "$RETVAL" -ne 0 ]; then
+    echo "⚠️ [STEP 7] Backup completed with exit code $RETVAL."
+    echo "  (This is expected behavior for Cloud Backups where media transfer happens later)."
+else
+    echo "✓ [STEP 7] Backup completed successfully."
 fi
+echo ""
 
 echo ""
 
@@ -209,6 +216,10 @@ echo "→ [STEP 8] Running Control Group: ${CONTROL_GROUP_2}..."
 echo "  This will run synchronously and may take a long time..."
 echo ""
 
+# Initialize variable to safe default
+RETVAL=0
+
+# Run SSH. Use '|| RETVAL=$?' to catch the non-zero exit code without triggering 'set -e'
 ssh -i "$VSI_KEY_FILE" \
   -o StrictHostKeyChecking=no \
   -o UserKnownHostsFile=/dev/null \
@@ -221,12 +232,17 @@ ssh -i "$VSI_KEY_FILE" \
        -o ServerAliveInterval=60 \
        -o ServerAliveCountMax=120 \
        ${SSH_USER}@${IBMI_CLONE_IP} \
-       'system \"STRBKUBRM CTLGRP(${CONTROL_GROUP_2}) SBMJOB(*NO)\"'"
+       'system \"STRBKUBRM CTLGRP(${CONTROL_GROUP_2}) SBMJOB(*NO)\"'" || RETVAL=$?
 
-# Check the exit code of the SSH command
-if [ $? -ne 0 ]; then
-  echo "⚠️ Backup completed with errors (likely 'Media Not Transferred'). Proceeding..."
+# Now check the captured return code safely
+if [ "$RETVAL" -ne 0 ]; then
+  echo "⚠️ [STEP 8] Backup completed with exit code $RETVAL."
+  echo "  (This is expected behavior for Cloud Backups where media transfer happens later)."
+  # Optional: You can proceed safely here.
+else
+  echo "✓ [STEP 8] Backup completed successfully."
 fi
+
 
 # ------------------------------------------------------------------------------
 # STEP 9: Run BRMS Maintenance to Move Media to Cloud
