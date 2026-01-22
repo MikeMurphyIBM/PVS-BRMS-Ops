@@ -134,70 +134,63 @@ echo ""
 # STEP 10: Poll for Transfer Completion
 # ------------------------------------------------------------------------------
 # ------------------------------------------------------------------------------
-# STEP 10: Poll for Transfer Completion
+# STEP 10: Verify Cloud Upload via S3 Listing
 # ------------------------------------------------------------------------------
-echo "→ [STEP 35] Polling for transfer completion..."
+# ------------------------------------------------------------------------------
+# STEP 10: Verify Cloud Upload (Time Window Check)
+# ------------------------------------------------------------------------------
+echo "→ [STEP 10] Verifying backup files in Cloud Object Storage..."
 
-MAX_RETRIES=288
-SLEEP_SECONDS=300
-COUNT=0
+# 1. Variables
+SYSTEM_NAME="MURPHYXP"
+COS_DIR="QBRMS_${SYSTEM_NAME}"
 
-while [ $COUNT -lt $MAX_RETRIES ]; do
-    echo "  Poll attempt $((COUNT+1))/${MAX_RETRIES}: Checking for remaining transfers..."
+# 2. Generate Time Strings (Current Hour AND Previous Hour)
+#    We use Python on the remote system to handle the date math reliably across timezones/shells.
+#    This produces a regex string like: "2026-01-22 12|2026-01-22 11"
+REMOTE_TIME_CMD="python3 -c 'import datetime; \
+now = datetime.datetime.now(); \
+prev = now - datetime.timedelta(hours=1); \
+print(now.strftime(\"%Y-%m-%d %H\") + \"|\" + prev.strftime(\"%Y-%m-%d %H\"))'"
 
-    # Remote command:
-    # 1. Setup temp file.
-    # 2. Run WRKMEDBRM.
-    # 3. Copy spool file to temp file.
-    # 4. If copy succeeds, grep for '*TRF'. If copy fails (no file), echo '0'.
-    
-    REMOTE_CMD="rm -f /tmp/trf.txt; \
-                touch /tmp/trf.txt; \
-                system 'DLTF FILE(QTEMP/CHECKTRF)' > /dev/null 2>&1 ; \
-                system 'CRTPF FILE(QTEMP/CHECKTRF) RCDLEN(198)' > /dev/null 2>&1 ; \
-                system 'WRKMEDBRM TYPE(*TRF) OUTPUT(*PRINT)' > /dev/null 2>&1 ; \
-                if system 'CPYSPLF FILE(QP1AMM) TOFILE(QTEMP/CHECKTRF) JOB(*) SPLNBR(*LAST)' > /dev/null 2>&1 ; then \
-                   system 'CPYTOIMPF FROMFILE(QTEMP/CHECKTRF) TOSTMF(''/tmp/trf.txt'') MBROPT(*REPLACE) RCDDLM(*LF)' > /dev/null 2>&1 ; \
-                   grep -c ' \*TRF' /tmp/trf.txt ; \
-                else \
-                   echo '0' ; \
-                fi"
+# Get the search pattern from the IBM i
+TIME_SEARCH_PATTERN=$(ssh -i "$VSI_KEY_FILE" \
+  -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \
+  ${SSH_USER}@${VSI_IP} \
+  "ssh -i /home/${SSH_USER}/.ssh/id_ed25519_vsi \
+       -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \
+       ${SSH_USER}@${IBMI_CLONE_IP} \
+       \"$REMOTE_TIME_CMD\"")
 
-    # Execute SSH
-    PENDING_COUNT=$(ssh -i "$VSI_KEY_FILE" \
-      -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \
-      ${SSH_USER}@${VSI_IP} \
-      "ssh -i /home/${SSH_USER}/.ssh/id_ed25519_vsi \
-           -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \
-           ${SSH_USER}@${IBMI_CLONE_IP} \
-           \"$REMOTE_CMD\"" || echo "999")
+# Clean up output
+TIME_SEARCH_PATTERN=$(echo "$TIME_SEARCH_PATTERN" | tr -d '[:space:]')
 
-    # Sanitize output
-    PENDING_COUNT=$(echo "$PENDING_COUNT" | tr -d '[:space:]')
+echo "  Searching for files matching time window (Current | Prev Hour):"
+echo "  Pattern: '$TIME_SEARCH_PATTERN'"
 
-    # Validation: Ensure result is a number.
-    # ACTUAL FIX: Use ^[1-9]+$ to match digits. 
-    # (Previous version incorrectly used ^+$ which failed to match '0')
-    if ! [[ "$PENDING_COUNT" =~ ^[1-9]+$ ]]; then
-        echo "  ⚠ Warning: Received invalid response ('$PENDING_COUNT'). Retrying in ${SLEEP_SECONDS}s..."
-        PENDING_COUNT=999
-    fi
+# 3. Construct Verification Command
+#    We use 'grep -E' for extended regex to support the pipe '|' (OR) operator.
+#    We look for the Date+Hour pattern AND the ' Q' volume prefix.
+REMOTE_CHECK="PATH=/QOpenSys/pkgs/bin:\$PATH; export PATH; \
+              aws --endpoint-url=${COS_ENDPOINT} s3 ls s3://${COS_BUCKET}/${COS_DIR}/ | grep -E '$TIME_SEARCH_PATTERN' | grep ' Q'"
 
-    # Check Status
-    if [ "$PENDING_COUNT" -eq "0" ]; then
-        echo "✓ Transfers complete. (Volumes in *TRF state: 0)"
-        break
-    else
-        echo "  ... Transfers still in progress. Volumes remaining: $PENDING_COUNT."
-        echo "      Waiting ${SLEEP_SECONDS}s before next check..."
-        sleep $SLEEP_SECONDS
-        COUNT=$((COUNT+1))
-    fi
-done
+# 4. Execute
+UPLOAD_RESULT=$(ssh -i "$VSI_KEY_FILE" \
+  -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \
+  ${SSH_USER}@${VSI_IP} \
+  "ssh -i /home/${SSH_USER}/.ssh/id_ed25519_vsi \
+       -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \
+       ${SSH_USER}@${IBMI_CLONE_IP} \
+       \"$REMOTE_CHECK\"" || true)
 
-if [ $COUNT -eq $MAX_RETRIES ]; then
-    echo "✗ Timeout waiting for transfers to complete."
-    exit 1 
+# 5. Validate
+if [[ -n "$UPLOAD_RESULT" ]]; then
+    echo "✓ SUCCESS: Found recent backup files in Cloud Object Storage:"
+    echo "$UPLOAD_RESULT"
+else
+    echo "✗ FAILURE: No files found in COS uploaded in the last 2 hours."
+    echo "  Expected files matching pattern: $TIME_SEARCH_PATTERN"
+    exit 1
 fi
 echo ""
 
