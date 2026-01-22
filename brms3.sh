@@ -135,7 +135,6 @@ echo ""
 # ------------------------------------------------------------------------------
 echo "→ [STEP 10] Polling for transfer completion..."
 
-# Configuration: Check every 5 minutes (300s), up to 288 times (24 hours)
 MAX_RETRIES=288
 SLEEP_SECONDS=300
 COUNT=0
@@ -143,21 +142,23 @@ COUNT=0
 while [ $COUNT -lt $MAX_RETRIES ]; do
     echo "  Poll attempt $((COUNT+1))/${MAX_RETRIES}: Checking for remaining transfers..."
 
-    # Define the remote command.
-    # Changes made:
-    # 1. Added 'touch /tmp/trf.txt' to ensure the file exists even if BRMS returns no list.
-    # 2. Fixed TOSTMF quoting to use double-single-quotes ('') which is safer in CL commands.
-    # 3. Suppressed all setup output to /dev/null so only the grep number is returned.
+    # Remote command breakdown:
+    # 1. rm: Clean up old temp file in PASE (Shell).
+    # 2. DLTF/CRTPF: Reset the temporary database file in CL.
+    # 3. WRKMEDBRM: Generate the report to spool.
+    # 4. CPYSPLF: Copy spool to DB file (Suppressed output).
+    # 5. CPYTOIMPF: Copy DB to stream file /tmp/trf.txt (Suppressed output).
+    # 6. Shell Logic: If /tmp/trf.txt exists, grep it. If not (meaning BRMS produced no list), return 0.
     
-    REMOTE_CMD="system 'DLTF FILE(QTEMP/CHECKTRF)' > /dev/null 2>&1 ; \
+    REMOTE_CMD="rm -f /tmp/trf.txt; \
+                system 'DLTF FILE(QTEMP/CHECKTRF)' > /dev/null 2>&1 ; \
                 system 'CRTPF FILE(QTEMP/CHECKTRF) RCDLEN(198)' > /dev/null 2>&1 ; \
                 system 'WRKMEDBRM TYPE(*TRF) OUTPUT(*PRINT)' > /dev/null 2>&1 ; \
                 system 'CPYSPLF FILE(QP1AMM) TOFILE(QTEMP/CHECKTRF) JOB(*) SPLNBR(*LAST)' > /dev/null 2>&1 ; \
-                system 'touch /tmp/trf.txt' > /dev/null 2>&1 ; \
-                system 'CPYTOIMPF FROMFILE(QTEMP/CHECKTRF) TOSTMF(''/tmp/trf.txt'') MBROPT(*REPLACE) RCDDLM(*LF)' > /dev/null 2>&1 ; \
-                grep -c '*TRF' /tmp/trf.txt"
+                system \"CPYTOIMPF FROMFILE(QTEMP/CHECKTRF) TOSTMF('/tmp/trf.txt') MBROPT(*REPLACE) RCDDLM(*LF)\" > /dev/null 2>&1 ; \
+                if [ -f /tmp/trf.txt ]; then grep -c '*TRF' /tmp/trf.txt; else echo '0'; fi"
 
-    # Execute SSH. If connection fails, echo "999" to retry.
+    # Run SSH. Capture the number. Default to 999 if SSH itself fails.
     PENDING_COUNT=$(ssh -i "$VSI_KEY_FILE" \
       -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \
       ${SSH_USER}@${VSI_IP} \
@@ -166,16 +167,15 @@ while [ $COUNT -lt $MAX_RETRIES ]; do
            ${SSH_USER}@${IBMI_CLONE_IP} \
            \"$REMOTE_CMD\"" || echo "999")
 
-    # Sanitize output (remove whitespace/newlines)
+    # Sanitize output (remove spaces/newlines)
     PENDING_COUNT=$(echo "$PENDING_COUNT" | tr -d '[:space:]')
 
-    # Validation: Ensure we received a number.
-    if ! [[ "$PENDING_COUNT" =~ ^[1-9]+$ ]]; then
-        echo "  ⚠ Warning: Received invalid response ('$PENDING_COUNT'). Retrying in ${SLEEP_SECONDS}s..."
+    # Validation: Ensure result is a number
+    if ! [[ "$PENDING_COUNT" =~ ^+$ ]]; then
+        echo "  ⚠ Warning: Received invalid response ('$PENDING_COUNT'). Retrying..."
         PENDING_COUNT=999
     fi
 
-    # Check Status
     if [ "$PENDING_COUNT" -eq "0" ]; then
         echo "✓ Transfers complete. (Volumes in *TRF state: 0)"
         break
@@ -188,7 +188,7 @@ while [ $COUNT -lt $MAX_RETRIES ]; do
 done
 
 if [ $COUNT -eq $MAX_RETRIES ]; then
-    echo "✗ Timeout waiting for transfers to complete (exceeded 24 hours)."
+    echo "✗ Timeout waiting for transfers to complete."
     exit 1 
 fi
 echo ""
