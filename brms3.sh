@@ -136,30 +136,28 @@ echo ""
 # ------------------------------------------------------------------------------
 # STEP 10: Verify Cloud Upload (Polling every 5 minutes)
 # ------------------------------------------------------------------------------
+# ------------------------------------------------------------------------------
+# STEP 55: Verify Cloud Upload (Optimized)
+# ------------------------------------------------------------------------------
 echo "→ [STEP 55] Verifying backup files in Cloud Object Storage..."
 
 # 1. Configuration
 SYSTEM_NAME="MURPHYXP"
 COS_DIR="QBRMS_${SYSTEM_NAME}"
-POLL_INTERVAL=300  # 5 Minutes (in seconds)
-MAX_RETRIES=20     # 20 checks * 5 min = 60 minutes max wait time
+POLL_INTERVAL=300  # 5 Minutes
+MAX_RETRIES=20     # 20 checks * 5 min = 100 minutes max wait time
 
-# 2. Generate Time Regex (Current Hour, -1 Hour, -2 Hours)
-#    (We calculate this once; valid for the duration of the script run)
-REMOTE_TIME_CMD="python3 -c 'import datetime; \
+# 2. Generate Time Regex (Local Calculation)
+#    Since Python 3 is now in your Docker container, we run this LOCALLY.
+#    This avoids SSH complexity for simple date math.
+echo "  Calculating search time window (Local Python)..."
+
+TIME_SEARCH_PATTERN=$(python3 -c 'import datetime; \
 now = datetime.datetime.now(); \
-h0 = now.strftime(\"%Y-%m-%d %H\"); \
-h1 = (now - datetime.timedelta(hours=1)).strftime(\"%Y-%m-%d %H\"); \
-h2 = (now - datetime.timedelta(hours=2)).strftime(\"%Y-%m-%d %H\"); \
-print(h0 + \"|\" + h1 + \"|\" + h2)'"
-
-TIME_SEARCH_PATTERN=$(ssh -i "$VSI_KEY_FILE" \
-  -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \
-  ${SSH_USER}@${VSI_IP} \
-  "ssh -i /home/${SSH_USER}/.ssh/id_ed25519_vsi \
-       -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \
-       ${SSH_USER}@${IBMI_CLONE_IP} \
-       \"$REMOTE_TIME_CMD\"" | tr -d '[:space:]')
+h0 = now.strftime("%Y-%m-%d %H"); \
+h1 = (now - datetime.timedelta(hours=1)).strftime("%Y-%m-%d %H"); \
+h2 = (now - datetime.timedelta(hours=2)).strftime("%Y-%m-%d %H"); \
+print(h0 + "|" + h1 + "|" + h2)')
 
 echo "  Search Pattern: '$TIME_SEARCH_PATTERN'"
 echo "  Target Bucket:  s3://${COS_BUCKET}/${COS_DIR}/"
@@ -171,7 +169,10 @@ found_files=false
 while [ $count -lt $MAX_RETRIES ]; do
     echo "  Attempt $((count+1)) of $MAX_RETRIES: Checking bucket..."
 
-    REMOTE_CHECK="PATH=/QOpenSys/pkgs/bin:\$PATH; export PATH; \
+    # We execute 'aws s3 ls' REMOTELY on the IBM i because that is where 
+    # the 'aws configure' credentials likely reside [Source 15, 85].
+    # We export the PATH to ensure 'aws' is found in /QOpenSys/pkgs/bin.
+    REMOTE_CHECK="export PATH=/QOpenSys/pkgs/bin:\$PATH; \
                   aws --endpoint-url=${COS_ENDPOINT} s3 ls s3://${COS_BUCKET}/${COS_DIR}/ | grep -E '$TIME_SEARCH_PATTERN' | grep ' Q'"
 
     UPLOAD_RESULT=$(ssh -i "$VSI_KEY_FILE" \
@@ -208,30 +209,11 @@ if [ "$found_files" = true ]; then
     echo "---------------------------------------------------"
 else
     echo "✗ FAILURE: Timed out waiting for files after $((MAX_RETRIES * POLL_INTERVAL / 60)) minutes."
+    echo "  Troubleshooting:"
+    echo "  1. Check if 'aws' is configured on IBM i (run 'aws configure' in SSH) [Source 86]."
+    echo "  2. Verify the IBM i can reach the COS Endpoint: ${COS_ENDPOINT} [Source 14]."
     exit 1
 fi
-echo ""
-# ------------------------------------------------------------------------------
-# STEP 11: Set BRMS State to End Backup
-# ------------------------------------------------------------------------------
-echo "→ [STEP 11] Setting BRMS state to *ENDBKU..."
-# This command tells BRMS on the clone that the FlashCopy backup sequence 
-# is finished [Source 599].
-
-ssh -i "$VSI_KEY_FILE" \
-  -o StrictHostKeyChecking=no \
-  -o UserKnownHostsFile=/dev/null \
-  ${SSH_USER}@${VSI_IP} \
-  "ssh -i /home/${SSH_USER}/.ssh/id_ed25519_vsi \
-       -o StrictHostKeyChecking=no \
-       -o UserKnownHostsFile=/dev/null \
-       ${SSH_USER}@${IBMI_CLONE_IP} \
-       'system \"INZBRM OPTION(*FLASHCOPY) STATE(*ENDBKU)\"'" || {
-    echo "✗ ERROR: Failed to set BRMS state to *ENDBKU"
-    exit 1
-}
-
-echo "✓ BRMS state set to *ENDBKU"
 echo ""
 
 # ------------------------------------------------------------------------------
