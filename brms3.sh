@@ -133,9 +133,6 @@ echo ""
 # ------------------------------------------------------------------------------
 # STEP 10: Poll for Transfer Completion
 # ------------------------------------------------------------------------------
-# ------------------------------------------------------------------------------
-# STEP 10: Poll for Transfer Completion
-# ------------------------------------------------------------------------------
 echo "→ [STEP 10] Polling for transfer completion..."
 
 # Retry loop parameters
@@ -146,26 +143,40 @@ COUNT=0
 while [ $COUNT -lt $MAX_RETRIES ]; do
     echo "  Poll attempt $((COUNT+1))/${MAX_RETRIES}: Checking for remaining transfers..."
 
-    # 1. DLTF: Clean up previous temp file (ignore error if missing)
-    # 2. WRKMEDBRM: Generate the *TRF report to a spooled file (QP1AMM)
-    # 3. CPYSPLF: Copy that spooled file to a temp physical file (QTEMP/CHECKTRF)
-    # 4. CPYTOIMPF: Convert physical file to a readable text file in /tmp/trf.txt
-    # 5. grep: Count lines containing "*TRF" (indicating active transfers)
+    # Define the remote command string.
+    # 1. DLTF: Delete temp file if it exists (redirect output to null to ignore 'not found' errors)
+    # 2. CRTPF: Manually create the physical file (Required because CPYSPLF cannot create it)
+    # 3. WRKMEDBRM: Generate the report to spool
+    # 4. CPYSPLF: Copy spool to the physical file we just created
+    # 5. CPYTOIMPF: Convert to stream file for grepping
+    # 6. grep: Count lines with '*TRF'. Returns the number.
     
+    # We use > /dev/null on the setup commands so they don't pollute the PENDING_COUNT variable.
+    
+    REMOTE_CMD="system 'DLTF FILE(QTEMP/CHECKTRF)' > /dev/null 2>&1 ; \
+                system 'CRTPF FILE(QTEMP/CHECKTRF) RCDLEN(198)' > /dev/null ; \
+                system 'WRKMEDBRM TYPE(*TRF) OUTPUT(*PRINT)' > /dev/null ; \
+                system 'CPYSPLF FILE(QP1AMM) TOFILE(QTEMP/CHECKTRF) JOB(*) SPLNBR(*LAST)' > /dev/null ; \
+                system 'CPYTOIMPF FROMFILE(QTEMP/CHECKTRF) TOSTMF('\'/tmp/trf.txt\'') MBROPT(*REPLACE) RCDDLM(*LF)' > /dev/null ; \
+                grep -c '*TRF' /tmp/trf.txt"
+
+    # Run SSH. If grep finds nothing or fails, echo "0" to prevent script crash.
     PENDING_COUNT=$(ssh -i "$VSI_KEY_FILE" \
       -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \
       ${SSH_USER}@${VSI_IP} \
       "ssh -i /home/${SSH_USER}/.ssh/id_ed25519_vsi \
            -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \
            ${SSH_USER}@${IBMI_CLONE_IP} \
-           'system \"DLTF FILE(QTEMP/CHECKTRF)\" ; \
-            system \"WRKMEDBRM TYPE(*TRF) OUTPUT(*PRINT)\" ; \
-            system \"CPYSPLF FILE(QP1AMM) TOFILE(QTEMP/CHECKTRF) JOB(*) SPLNBR(*LAST) CRTFILE(*YES)\" ; \
-            system \"CPYTOIMPF FROMFILE(QTEMP/CHECKTRF) TOSTMF('\'/tmp/trf.txt\'') MBROPT(*REPLACE) RCDDLM(*LF)\" ; \
-            grep -c \"*TRF\" /tmp/trf.txt'" || echo "0")
+           \"$REMOTE_CMD\"" || echo "0")
 
-    # Clean up output (remove any potential whitespace)
+    # Clean up output (remove any potential whitespace/newlines) to ensure integer comparison works
     PENDING_COUNT=$(echo "$PENDING_COUNT" | tr -d '[:space:]')
+
+    # Basic validation: ensure PENDING_COUNT is actually a number. If not, default to 1 to force retry.
+    if ! [[ "$PENDING_COUNT" =~ ^[1-9]+$ ]]; then
+        echo "  ⚠ Warning: Received invalid response from polling ('$PENDING_COUNT'). Retrying..."
+        PENDING_COUNT=1
+    fi
 
     if [ "$PENDING_COUNT" -eq "0" ]; then
         echo "✓ Transfers complete. No volumes found with *TRF status."
