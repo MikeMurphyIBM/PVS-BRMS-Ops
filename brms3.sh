@@ -133,7 +133,7 @@ echo ""
 # ------------------------------------------------------------------------------
 # STEP 10: Poll for Transfer Completion
 # ------------------------------------------------------------------------------
-echo "→ [STEP 10] Polling for transfer completion..."
+echo "→ [STEP 33] Polling for transfer completion..."
 
 MAX_RETRIES=288
 SLEEP_SECONDS=300
@@ -143,11 +143,10 @@ while [ $COUNT -lt $MAX_RETRIES ]; do
     echo "  Poll attempt $((COUNT+1))/${MAX_RETRIES}: Checking for remaining transfers..."
 
     # Remote command logic:
-    # 1. Prepare temp file.
-    # 2. Run WRKMEDBRM to list transfers.
-    # 3. Copy spool to temp file.
-    # 4. Count lines with '*TRF'. If file is empty/missing (error), echo '999'.
-    # Note: We use single quotes for the system command, so we double-escape the inner path: ''/tmp/trf.txt''
+    # 1. Run WRKMEDBRM to list transfers.
+    # 2. Try to copy the spool file (CPYSPLF). 
+    # 3. IF CPYSPLF fails (returns non-zero), it means no report exists (0 volumes pending). Echo '0'.
+    # 4. IF CPYSPLF succeeds, convert to text and grep for '*TRF' status.
     
     REMOTE_CMD="rm -f /tmp/trf.txt; \
                 touch /tmp/trf.txt; \
@@ -174,7 +173,7 @@ while [ $COUNT -lt $MAX_RETRIES ]; do
     PENDING_COUNT=$(echo "$PENDING_COUNT" | tr -d '[:space:]')
 
     # Validation: Ensure result is a number.
-    # FIX: Use ^[1-9]+$ to match digits. The previous ^+$ matched literal plus signs.
+    # FIX: Changed regex to ^[1-9]+$ to correctly identify digits.
     if ! [[ "$PENDING_COUNT" =~ ^[1-9]+$ ]]; then
         echo "  ⚠ Warning: Received invalid response ('$PENDING_COUNT'). Retrying in ${SLEEP_SECONDS}s..."
         PENDING_COUNT=999
@@ -197,6 +196,7 @@ if [ $COUNT -eq $MAX_RETRIES ]; then
     exit 1 
 fi
 echo ""
+
 # ------------------------------------------------------------------------------
 # STEP 11: Set BRMS State to End Backup
 # ------------------------------------------------------------------------------
