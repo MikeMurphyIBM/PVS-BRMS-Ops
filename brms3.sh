@@ -139,17 +139,17 @@ echo ""
 # ------------------------------------------------------------------------------
 # STEP 55: Verify Cloud Upload (Optimized)
 # ------------------------------------------------------------------------------
+# ------------------------------------------------------------------------------
+# STEP 55: Verify Cloud Upload (Optimized)
+# ------------------------------------------------------------------------------
 echo "→ [STEP 55] Verifying backup files in Cloud Object Storage..."
 
 # 1. Configuration
 SYSTEM_NAME="MURPHYXP"
 COS_DIR="QBRMS_${SYSTEM_NAME}"
-POLL_INTERVAL=300  # 5 Minutes
-MAX_RETRIES=20     # 20 checks * 5 min = 100 minutes max wait time
+# Note: POLL_INTERVAL and MAX_RETRIES already defined at top of script
 
 # 2. Generate Time Regex (Local Calculation)
-#    Since Python 3 is now in your Docker container, we run this LOCALLY.
-#    This avoids SSH complexity for simple date math.
 echo "  Calculating search time window (Local Python)..."
 
 TIME_SEARCH_PATTERN=$(python3 -c 'import datetime; \
@@ -168,26 +168,27 @@ found_files=false
 
 while [ $count -lt $MAX_RETRIES ]; do
     echo "  Attempt $((count+1)) of $MAX_RETRIES: Checking bucket..."
-
-    # We execute 'aws s3 ls' REMOTELY on the IBM i because that is where 
-    # the 'aws configure' credentials likely reside [Source 15, 85].
-    # We export the PATH to ensure 'aws' is found in /QOpenSys/pkgs/bin.
-    REMOTE_CHECK="export PATH=/QOpenSys/pkgs/bin:\$PATH; \
-                  aws --endpoint-url=${COS_ENDPOINT} s3 ls s3://${COS_BUCKET}/${COS_DIR}/ | grep -E '$TIME_SEARCH_PATTERN' | grep ' Q'"
-
+    
+    # Build the remote command with properly escaped pattern
+    REMOTE_CHECK="export PATH=/QOpenSys/pkgs/bin:\$PATH; aws --endpoint-url=${COS_ENDPOINT} s3 ls s3://${COS_BUCKET}/${COS_DIR}/ | grep -E '${TIME_SEARCH_PATTERN}' | grep ' Q'"
+    
+    # Temporarily disable exit-on-error for this command
+    set +e
     UPLOAD_RESULT=$(ssh -i "$VSI_KEY_FILE" \
       -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \
       ${SSH_USER}@${VSI_IP} \
       "ssh -i /home/${SSH_USER}/.ssh/id_ed25519_vsi \
            -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \
            ${SSH_USER}@${IBMI_CLONE_IP} \
-           \"$REMOTE_CHECK\"" || true)
-
-    if [[ -n "$UPLOAD_RESULT" ]]; then
+           \"$REMOTE_CHECK\"" 2>&1)
+    SSH_RC=$?
+    set -e
+    
+    if [ $SSH_RC -eq 0 ] && [ -n "$UPLOAD_RESULT" ]; then
         found_files=true
-        break # Exit loop on success
+        break
     fi
-
+    
     # If we are here, files were not found. Wait and retry.
     if [ $((count+1)) -lt $MAX_RETRIES ]; then
         echo "    No files found yet. Waiting $POLL_INTERVAL seconds..."
@@ -210,45 +211,11 @@ if [ "$found_files" = true ]; then
 else
     echo "✗ FAILURE: Timed out waiting for files after $((MAX_RETRIES * POLL_INTERVAL / 60)) minutes."
     echo "  Troubleshooting:"
-    echo "  1. Check if 'aws' is configured on IBM i (run 'aws configure' in SSH) [Source 86]."
-    echo "  2. Verify the IBM i can reach the COS Endpoint: ${COS_ENDPOINT} [Source 14]."
+    echo "  1. Check if 'aws' is configured on IBM i (run 'aws configure' in SSH)."
+    echo "  2. Verify the IBM i can reach the COS Endpoint: ${COS_ENDPOINT}."
     exit 1
 fi
 echo ""
-
-# ------------------------------------------------------------------------------
-# STEP 12: Create Library and Save File
-# ------------------------------------------------------------------------------
-echo "→ [STEP 12] Creating library ${SAVF_LIB} and save file ${SAVF_NAME}..."
-
-ssh -i "$VSI_KEY_FILE" \
-  -o StrictHostKeyChecking=no \
-  -o UserKnownHostsFile=/dev/null \
-  ${SSH_USER}@${VSI_IP} \
-  "ssh -i /home/${SSH_USER}/.ssh/id_ed25519_vsi \
-       -o StrictHostKeyChecking=no \
-       -o UserKnownHostsFile=/dev/null \
-       ${SSH_USER}@${IBMI_CLONE_IP} \
-       'system \"CRTLIB LIB(${SAVF_LIB})\"'" || {
-    echo "⚠ WARNING: Library ${SAVF_LIB} may already exist"
-}
-
-ssh -i "$VSI_KEY_FILE" \
-  -o StrictHostKeyChecking=no \
-  -o UserKnownHostsFile=/dev/null \
-  ${SSH_USER}@${VSI_IP} \
-  "ssh -i /home/${SSH_USER}/.ssh/id_ed25519_vsi \
-       -o StrictHostKeyChecking=no \
-       -o UserKnownHostsFile=/dev/null \
-       ${SSH_USER}@${IBMI_CLONE_IP} \
-       'system \"CRTSAVF FILE(${SAVF_LIB}/${SAVF_NAME})\"'" || {
-    echo "✗ ERROR: Failed to create save file"
-    exit 1
-}
-
-echo "✓ Library and save file created"
-echo ""
-
 # ------------------------------------------------------------------------------
 # STEP 13: Save QUSRBRM to Save File
 # ------------------------------------------------------------------------------
