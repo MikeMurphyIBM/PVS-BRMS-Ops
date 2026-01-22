@@ -196,13 +196,10 @@ ssh -i "$VSI_KEY_FILE" \
        ${SSH_USER}@${IBMI_CLONE_IP} \
        'system \"STRBKUBRM CTLGRP(${CONTROL_GROUP_1}) SBMJOB(*NO)\"'"
 
-# Check the exit code of the SSH command
 if [ $? -ne 0 ]; then
-    echo "⚠ [STEP 7] Control group ${CONTROL_GROUP_1} completed with errors."
-    echo "  (This is expected for Cloud Backups where media transfer happens later)."
-else
-    echo "✓ [STEP 7] Control group ${CONTROL_GROUP_1} completed successfully."
+    echo "⚠️ Backup completed with errors (likely 'Media Not Transferred'). Proceeding..."
 fi
+
 echo ""
 
 # ------------------------------------------------------------------------------
@@ -228,12 +225,8 @@ ssh -i "$VSI_KEY_FILE" \
 
 # Check the exit code of the SSH command
 if [ $? -ne 0 ]; then
-    echo "⚠ [STEP 8] Control group ${CONTROL_GROUP_2} completed with errors."
-    echo "  (This is expected for Cloud Backups where media transfer happens later)."
-else
-    echo "✓ [STEP 8] Control group ${CONTROL_GROUP_2} completed successfully."
+  echo "⚠️ Backup completed with errors (likely 'Media Not Transferred'). Proceeding..."
 fi
-echo ""
 
 # ------------------------------------------------------------------------------
 # STEP 9: Run BRMS Maintenance to Move Media to Cloud
