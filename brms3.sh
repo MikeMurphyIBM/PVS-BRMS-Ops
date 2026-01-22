@@ -142,17 +142,22 @@ COUNT=0
 while [ $COUNT -lt $MAX_RETRIES ]; do
     echo "  Poll attempt $((COUNT+1))/${MAX_RETRIES}: Checking for remaining transfers..."
 
-    # Remote command to check status silently. 
-    # Uses single quotes for IBM i commands and double-single quotes ('') for internal string literals.
+    # Remote command changes:
+    # 1. We create the file first with 'touch' to ensure it exists.
+    # 2. We run the BRMS commands.
+    # 3. CRITICAL CHANGE: If the file is empty or unreadable, we echo '999' (Retry) 
+    #    instead of '0'. We only echo '0' if grep actually searches the file and finds nothing.
+    
     REMOTE_CMD="rm -f /tmp/trf.txt; \
+                touch /tmp/trf.txt; \
                 system 'DLTF FILE(QTEMP/CHECKTRF)' > /dev/null 2>&1 ; \
                 system 'CRTPF FILE(QTEMP/CHECKTRF) RCDLEN(198)' > /dev/null 2>&1 ; \
                 system 'WRKMEDBRM TYPE(*TRF) OUTPUT(*PRINT)' > /dev/null 2>&1 ; \
                 system 'CPYSPLF FILE(QP1AMM) TOFILE(QTEMP/CHECKTRF) JOB(*) SPLNBR(*LAST)' > /dev/null 2>&1 ; \
                 system 'CPYTOIMPF FROMFILE(QTEMP/CHECKTRF) TOSTMF(''/tmp/trf.txt'') MBROPT(*REPLACE) RCDDLM(*LF)' > /dev/null 2>&1 ; \
-                if [ -f /tmp/trf.txt ]; then grep -c '*TRF' /tmp/trf.txt; else echo '0'; fi"
+                if [ -s /tmp/trf.txt ]; then grep -c '*TRF' /tmp/trf.txt; else echo '999'; fi"
 
-    # Execute SSH. 
+    # Execute SSH
     PENDING_COUNT=$(ssh -i "$VSI_KEY_FILE" \
       -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \
       ${SSH_USER}@${VSI_IP} \
@@ -161,16 +166,17 @@ while [ $COUNT -lt $MAX_RETRIES ]; do
            ${SSH_USER}@${IBMI_CLONE_IP} \
            \"$REMOTE_CMD\"" || echo "999")
 
-    # Sanitize output (remove whitespace/newlines)
+    # Sanitize output
     PENDING_COUNT=$(echo "$PENDING_COUNT" | tr -d '[:space:]')
 
-    # Validate we got a number (Fixed Regex: ^[1-9]+$)
+    # Validation: Ensure result is a number (Fixed Regex: ^[1-9]+$)
+    # If the script fails to get a number, we default to 999 to keep waiting.
     if ! [[ "$PENDING_COUNT" =~ ^[1-9]+$ ]]; then
         echo "  ⚠ Warning: Received invalid response ('$PENDING_COUNT'). Retrying in ${SLEEP_SECONDS}s..."
         PENDING_COUNT=999
     fi
 
-    # Check logic
+    # Check Status
     if [ "$PENDING_COUNT" -eq "0" ]; then
         echo "✓ Transfers complete. (Volumes in *TRF state: 0)"
         break
