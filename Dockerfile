@@ -4,12 +4,17 @@ FROM ubuntu:22.04
 ENV DEBIAN_FRONTEND=noninteractive
 
 # Install required packages
+# ADDED: python3, python3-pip, and awscli are required for the verification script
+# Source [1] recommends installing python3 and awscli for Cloud Object Storage interactions.
 RUN apt-get update && apt-get install -y \
     curl \
     wget \
     jq \
     openssh-client \
     ca-certificates \
+    python3 \
+    python3-pip \
+    awscli \
     && rm -rf /var/lib/apt/lists/*
 
 # Install IBM Cloud CLI
