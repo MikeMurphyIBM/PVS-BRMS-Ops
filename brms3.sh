@@ -134,66 +134,83 @@ echo ""
 # STEP 10: Poll for Transfer Completion
 # ------------------------------------------------------------------------------
 # ------------------------------------------------------------------------------
-# STEP 10: Verify Cloud Upload via S3 Listing
+# STEP 10: Verify Cloud Upload (Polling every 5 minutes)
 # ------------------------------------------------------------------------------
-# ------------------------------------------------------------------------------
-# STEP 10: Verify Cloud Upload (Time Window Check)
-# ------------------------------------------------------------------------------
-echo "→ [STEP 10] Verifying backup files in Cloud Object Storage..."
+echo "→ [STEP 55] Verifying backup files in Cloud Object Storage..."
 
-# 1. Variables
+# 1. Configuration
 SYSTEM_NAME="MURPHYXP"
 COS_DIR="QBRMS_${SYSTEM_NAME}"
+POLL_INTERVAL=300  # 5 Minutes (in seconds)
+MAX_RETRIES=20     # 20 checks * 5 min = 60 minutes max wait time
 
-# 2. Generate Time Strings (Current Hour AND Previous Hour)
-#    We use Python on the remote system to handle the date math reliably across timezones/shells.
-#    This produces a regex string like: "2026-01-22 12|2026-01-22 11"
+# 2. Generate Time Regex (Current Hour, -1 Hour, -2 Hours)
+#    (We calculate this once; valid for the duration of the script run)
 REMOTE_TIME_CMD="python3 -c 'import datetime; \
 now = datetime.datetime.now(); \
-prev = now - datetime.timedelta(hours=1); \
-print(now.strftime(\"%Y-%m-%d %H\") + \"|\" + prev.strftime(\"%Y-%m-%d %H\"))'"
+h0 = now.strftime(\"%Y-%m-%d %H\"); \
+h1 = (now - datetime.timedelta(hours=1)).strftime(\"%Y-%m-%d %H\"); \
+h2 = (now - datetime.timedelta(hours=2)).strftime(\"%Y-%m-%d %H\"); \
+print(h0 + \"|\" + h1 + \"|\" + h2)'"
 
-# Get the search pattern from the IBM i
 TIME_SEARCH_PATTERN=$(ssh -i "$VSI_KEY_FILE" \
   -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \
   ${SSH_USER}@${VSI_IP} \
   "ssh -i /home/${SSH_USER}/.ssh/id_ed25519_vsi \
        -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \
        ${SSH_USER}@${IBMI_CLONE_IP} \
-       \"$REMOTE_TIME_CMD\"")
+       \"$REMOTE_TIME_CMD\"" | tr -d '[:space:]')
 
-# Clean up output
-TIME_SEARCH_PATTERN=$(echo "$TIME_SEARCH_PATTERN" | tr -d '[:space:]')
+echo "  Search Pattern: '$TIME_SEARCH_PATTERN'"
+echo "  Target Bucket:  s3://${COS_BUCKET}/${COS_DIR}/"
 
-echo "  Searching for files matching time window (Current | Prev Hour):"
-echo "  Pattern: '$TIME_SEARCH_PATTERN'"
+# 3. Polling Loop
+count=0
+found_files=false
 
-# 3. Construct Verification Command
-#    We use 'grep -E' for extended regex to support the pipe '|' (OR) operator.
-#    We look for the Date+Hour pattern AND the ' Q' volume prefix.
-REMOTE_CHECK="PATH=/QOpenSys/pkgs/bin:\$PATH; export PATH; \
-              aws --endpoint-url=${COS_ENDPOINT} s3 ls s3://${COS_BUCKET}/${COS_DIR}/ | grep -E '$TIME_SEARCH_PATTERN' | grep ' Q'"
+while [ $count -lt $MAX_RETRIES ]; do
+    echo "  Attempt $((count+1)) of $MAX_RETRIES: Checking bucket..."
 
-# 4. Execute
-UPLOAD_RESULT=$(ssh -i "$VSI_KEY_FILE" \
-  -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \
-  ${SSH_USER}@${VSI_IP} \
-  "ssh -i /home/${SSH_USER}/.ssh/id_ed25519_vsi \
-       -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \
-       ${SSH_USER}@${IBMI_CLONE_IP} \
-       \"$REMOTE_CHECK\"" || true)
+    REMOTE_CHECK="PATH=/QOpenSys/pkgs/bin:\$PATH; export PATH; \
+                  aws --endpoint-url=${COS_ENDPOINT} s3 ls s3://${COS_BUCKET}/${COS_DIR}/ | grep -E '$TIME_SEARCH_PATTERN' | grep ' Q'"
 
-# 5. Validate
-if [[ -n "$UPLOAD_RESULT" ]]; then
-    echo "✓ SUCCESS: Found recent backup files in Cloud Object Storage:"
-    echo "$UPLOAD_RESULT"
+    UPLOAD_RESULT=$(ssh -i "$VSI_KEY_FILE" \
+      -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \
+      ${SSH_USER}@${VSI_IP} \
+      "ssh -i /home/${SSH_USER}/.ssh/id_ed25519_vsi \
+           -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \
+           ${SSH_USER}@${IBMI_CLONE_IP} \
+           \"$REMOTE_CHECK\"" || true)
+
+    if [[ -n "$UPLOAD_RESULT" ]]; then
+        found_files=true
+        break # Exit loop on success
+    fi
+
+    # If we are here, files were not found. Wait and retry.
+    if [ $((count+1)) -lt $MAX_RETRIES ]; then
+        echo "    No files found yet. Waiting $POLL_INTERVAL seconds..."
+        sleep $POLL_INTERVAL
+    fi
+    ((count++))
+done
+
+# 4. Final Validation
+if [ "$found_files" = true ]; then
+    SAVED_FILES=$(echo "$UPLOAD_RESULT" | awk '{print $NF}')
+    FILE_COUNT=$(echo "$SAVED_FILES" | wc -l)
+    
+    echo "✓ SUCCESS: Verified $FILE_COUNT volume(s) uploaded successfully."
+    echo "---------------------------------------------------"
+    echo " COMPLETION SUMMARY: VOLUMES UPLOADED"
+    echo "---------------------------------------------------"
+    echo "$SAVED_FILES"
+    echo "---------------------------------------------------"
 else
-    echo "✗ FAILURE: No files found in COS uploaded in the last 2 hours."
-    echo "  Expected files matching pattern: $TIME_SEARCH_PATTERN"
+    echo "✗ FAILURE: Timed out waiting for files after $((MAX_RETRIES * POLL_INTERVAL / 60)) minutes."
     exit 1
 fi
 echo ""
-
 # ------------------------------------------------------------------------------
 # STEP 11: Set BRMS State to End Backup
 # ------------------------------------------------------------------------------
