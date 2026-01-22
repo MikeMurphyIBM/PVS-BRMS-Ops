@@ -149,7 +149,12 @@ SYSTEM_NAME="MURPHYXP"
 COS_DIR="QBRMS_${SYSTEM_NAME}"
 # Note: POLL_INTERVAL and MAX_RETRIES already defined at top of script
 
-# 2. Generate Time Regex (Local Calculation)
+# ------------------------------------------------------------------------------
+# STEP 55: Verify Cloud Upload
+# ------------------------------------------------------------------------------
+echo "→ [STEP 55] Verifying backup files in Cloud Object Storage..."
+
+# 1. Generate Time Regex (Local Calculation using Container's Python)
 echo "  Calculating search time window (Local Python)..."
 
 TIME_SEARCH_PATTERN=$(python3 -c 'import datetime; \
@@ -162,34 +167,26 @@ print(h0 + "|" + h1 + "|" + h2)')
 echo "  Search Pattern: '$TIME_SEARCH_PATTERN'"
 echo "  Target Bucket:  s3://${COS_BUCKET}/${COS_DIR}/"
 
-# 3. Polling Loop
+# 2. Polling Loop
 count=0
 found_files=false
 
 while [ $count -lt $MAX_RETRIES ]; do
     echo "  Attempt $((count+1)) of $MAX_RETRIES: Checking bucket..."
-    
-    # Build the remote command with properly escaped pattern
-    REMOTE_CHECK="export PATH=/QOpenSys/pkgs/bin:\$PATH; aws --endpoint-url=${COS_ENDPOINT} s3 ls s3://${COS_BUCKET}/${COS_DIR}/ | grep -E '${TIME_SEARCH_PATTERN}' | grep ' Q'"
-    
-    # Temporarily disable exit-on-error for this command
-    set +e
-    UPLOAD_RESULT=$(ssh -i "$VSI_KEY_FILE" \
-      -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \
-      ${SSH_USER}@${VSI_IP} \
-      "ssh -i /home/${SSH_USER}/.ssh/id_ed25519_vsi \
-           -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \
-           ${SSH_USER}@${IBMI_CLONE_IP} \
-           \"$REMOTE_CHECK\"" 2>&1)
-    SSH_RC=$?
-    set -e
-    
-    if [ $SSH_RC -eq 0 ] && [ -n "$UPLOAD_RESULT" ]; then
+
+    # Remote check using AWS CLI on the IBM i
+    # We export PATH to ensure 'aws' is found in /QOpenSys/pkgs/bin
+    REMOTE_CHECK="export PATH=/QOpenSys/pkgs/bin:\$PATH; \
+                  aws --endpoint-url=${COS_ENDPOINT} s3 ls s3://${COS_BUCKET}/${COS_DIR}/ | grep -E '$TIME_SEARCH_PATTERN' | grep ' Q'"
+
+    # We use || true to prevent the script from exiting if grep finds nothing (exit code 1)
+    UPLOAD_RESULT=$(ssh -i "$VSI_KEY_FILE" $SSH_OPTS ${SSH_USER}@${VSI_IP} "$REMOTE_CHECK" || true)
+
+    if [[ -n "$UPLOAD_RESULT" ]]; then
         found_files=true
-        break
+        break # Exit loop on success
     fi
-    
-    # If we are here, files were not found. Wait and retry.
+
     if [ $((count+1)) -lt $MAX_RETRIES ]; then
         echo "    No files found yet. Waiting $POLL_INTERVAL seconds..."
         sleep $POLL_INTERVAL
@@ -197,7 +194,7 @@ while [ $count -lt $MAX_RETRIES ]; do
     ((count++))
 done
 
-# 4. Final Validation
+# 3. Final Validation
 if [ "$found_files" = true ]; then
     SAVED_FILES=$(echo "$UPLOAD_RESULT" | awk '{print $NF}')
     FILE_COUNT=$(echo "$SAVED_FILES" | wc -l)
@@ -211,7 +208,7 @@ if [ "$found_files" = true ]; then
 else
     echo "✗ FAILURE: Timed out waiting for files after $((MAX_RETRIES * POLL_INTERVAL / 60)) minutes."
     echo "  Troubleshooting:"
-    echo "  1. Check if 'aws' is configured on IBM i (run 'aws configure' in SSH)."
+    echo "  1. Check if 'aws' is configured on IBM i (run 'aws configure' via SSH)."
     echo "  2. Verify the IBM i can reach the COS Endpoint: ${COS_ENDPOINT}."
     exit 1
 fi
