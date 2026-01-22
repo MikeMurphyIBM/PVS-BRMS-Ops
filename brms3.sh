@@ -142,20 +142,23 @@ COUNT=0
 while [ $COUNT -lt $MAX_RETRIES ]; do
     echo "  Poll attempt $((COUNT+1))/${MAX_RETRIES}: Checking for remaining transfers..."
 
-    # Remote command changes:
-    # 1. We create the file first with 'touch' to ensure it exists.
-    # 2. We run the BRMS commands.
-    # 3. CRITICAL CHANGE: If the file is empty or unreadable, we echo '999' (Retry) 
-    #    instead of '0'. We only echo '0' if grep actually searches the file and finds nothing.
+    # Remote Logic Breakdown:
+    # 1. Run WRKMEDBRM.
+    # 2. Try to copy the spool file (CPYSPLF). 
+    # 3. IF CPYSPLF fails (returns non-zero), it means no report exists = 0 volumes pending. Echo '0'.
+    # 4. IF CPYSPLF succeeds, convert to text and grep.
+    # 5. We grep for ' *TRF' (space *TRF) to match data columns but ignore the header '...:*TRF'
     
     REMOTE_CMD="rm -f /tmp/trf.txt; \
-                touch /tmp/trf.txt; \
                 system 'DLTF FILE(QTEMP/CHECKTRF)' > /dev/null 2>&1 ; \
                 system 'CRTPF FILE(QTEMP/CHECKTRF) RCDLEN(198)' > /dev/null 2>&1 ; \
                 system 'WRKMEDBRM TYPE(*TRF) OUTPUT(*PRINT)' > /dev/null 2>&1 ; \
-                system 'CPYSPLF FILE(QP1AMM) TOFILE(QTEMP/CHECKTRF) JOB(*) SPLNBR(*LAST)' > /dev/null 2>&1 ; \
-                system 'CPYTOIMPF FROMFILE(QTEMP/CHECKTRF) TOSTMF(''/tmp/trf.txt'') MBROPT(*REPLACE) RCDDLM(*LF)' > /dev/null 2>&1 ; \
-                if [ -s /tmp/trf.txt ]; then grep -c '*TRF' /tmp/trf.txt; else echo '999'; fi"
+                if system 'CPYSPLF FILE(QP1AMM) TOFILE(QTEMP/CHECKTRF) JOB(*) SPLNBR(*LAST)' > /dev/null 2>&1 ; then \
+                   system 'CPYTOIMPF FROMFILE(QTEMP/CHECKTRF) TOSTMF(''/tmp/trf.txt'') MBROPT(*REPLACE) RCDDLM(*LF)' > /dev/null 2>&1 ; \
+                   grep -c ' \*TRF' /tmp/trf.txt ; \
+                else \
+                   echo '0' ; \
+                fi"
 
     # Execute SSH
     PENDING_COUNT=$(ssh -i "$VSI_KEY_FILE" \
@@ -169,10 +172,9 @@ while [ $COUNT -lt $MAX_RETRIES ]; do
     # Sanitize output
     PENDING_COUNT=$(echo "$PENDING_COUNT" | tr -d '[:space:]')
 
-    # Validation: Ensure result is a number (Fixed Regex: ^[1-9]+$)
-    # If the script fails to get a number, we default to 999 to keep waiting.
+    # Validate numeric response
     if ! [[ "$PENDING_COUNT" =~ ^[1-9]+$ ]]; then
-        echo "  ⚠ Warning: Received invalid response ('$PENDING_COUNT'). Retrying in ${SLEEP_SECONDS}s..."
+        echo "  ⚠ Warning: Received invalid response ('$PENDING_COUNT'). Retrying..."
         PENDING_COUNT=999
     fi
 
@@ -189,7 +191,7 @@ while [ $COUNT -lt $MAX_RETRIES ]; do
 done
 
 if [ $COUNT -eq $MAX_RETRIES ]; then
-    echo "✗ Timeout waiting for transfers to complete (exceeded 24 hours)."
+    echo "✗ Timeout waiting for transfers to complete."
     exit 1 
 fi
 echo ""
@@ -281,10 +283,9 @@ echo ""
 # STEP 14: Upload History File to COS
 # ------------------------------------------------------------------------------
 echo "→ [STEP 14] Uploading history file to COS..."
-# Note: We export PATH inside this specific SSH command to ensure the 
-# AWS CLI and its dependencies (Python) are found in the PASE environment.
-# We use 'cat' to stream the binary save file directly to the AWS CLI stdin (-).
-# [Source 113]
+# Note: We split the PATH definition and export into two commands to satisfy the 
+# IBM i shell (bsh) requirements. We use 'cat' to stream the binary save file 
+# directly to the AWS CLI stdin (-).
 
 ssh -i "$VSI_KEY_FILE" \
   -o StrictHostKeyChecking=no \
@@ -294,7 +295,7 @@ ssh -i "$VSI_KEY_FILE" \
        -o StrictHostKeyChecking=no \
        -o UserKnownHostsFile=/dev/null \
        ${SSH_USER}@${IBMI_CLONE_IP} \
-       'export PATH=/QOpenSys/pkgs/bin:\$PATH; \
+       'PATH=/QOpenSys/pkgs/bin:\$PATH; export PATH; \
         cat ${SAVF_PATH_IFS} | aws --endpoint-url=${COS_ENDPOINT} s3 cp - s3://${COS_BUCKET}/${COS_FILE}'" || {
     echo "✗ ERROR: Failed to upload history file to COS"
     exit 1
@@ -370,9 +371,9 @@ echo ""
 # STEP 19: Download History File from COS (PATH set inline)
 # ------------------------------------------------------------------------------
 echo "→ [STEP 19] Downloading history file from COS to source LPAR..."
-# Note: We export PATH *inside* this command string. This is required because
-# SSH sessions do not retain environment variables from previous steps.
-# The file is downloaded to /tmp first because AWS CLI cannot write to *SAVF directly [Source 914].
+# Note: We split the PATH definition and export to ensure compatibility 
+# with the IBM i shell (bsh). The file is downloaded to /tmp first 
+# because AWS CLI cannot write to *SAVF directly [Source 914].
 
 ssh -i "$VSI_KEY_FILE" \
   -o StrictHostKeyChecking=no \
@@ -382,7 +383,7 @@ ssh -i "$VSI_KEY_FILE" \
        -o StrictHostKeyChecking=no \
        -o UserKnownHostsFile=/dev/null \
        ${SSH_USER}@${IBMI_SOURCE_IP} \
-       'export PATH=/QOpenSys/pkgs/bin:\$PATH; \
+       'PATH=/QOpenSys/pkgs/bin:\$PATH; export PATH; \
         aws --endpoint-url=${COS_ENDPOINT} s3 cp s3://${COS_BUCKET}/${COS_FILE} /tmp/${COS_FILE}'" || {
     echo "✗ ERROR: Failed to download from COS"
     exit 1
