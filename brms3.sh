@@ -269,26 +269,6 @@ ssh -i "$VSI_KEY_FILE" \
 echo "✓ History file uploaded successfully to s3://${COS_BUCKET}/${COS_FILE}"
 echo ""
 
-# ------------------------------------------------------------------------------
-# STEP 15: Delete Save File on Clone
-# ------------------------------------------------------------------------------
-echo "→ [STEP 15] Deleting save file on clone LPAR..."
-# Clean up the temporary save file to free up storage on the clone.
-
-ssh -i "$VSI_KEY_FILE" \
-  -o StrictHostKeyChecking=no \
-  -o UserKnownHostsFile=/dev/null \
-  ${SSH_USER}@${VSI_IP} \
-  "ssh -i /home/${SSH_USER}/.ssh/id_ed25519_vsi \
-       -o StrictHostKeyChecking=no \
-       -o UserKnownHostsFile=/dev/null \
-       ${SSH_USER}@${IBMI_CLONE_IP} \
-       'system \"DLTF FILE(${SAVF_LIB}/${SAVF_NAME})\"'" || {
-    echo "⚠ WARNING: Failed to delete save file (cleanup)"
-}
-
-echo "✓ Save file deleted on clone LPAR"
-echo ""
 
 ################################################################################
 # SOURCE LPAR OPERATIONS
