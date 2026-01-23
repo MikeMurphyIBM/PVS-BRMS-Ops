@@ -29,6 +29,8 @@ RUN ibmcloud plugin install code-engine -f
 # Create workspace directory
 WORKDIR /workspace
 
+RUN dos2unix /workspace/brms3.sh
+
 # Copy BRMS script into the container
 COPY brms3.sh /workspace/brms3.sh
 
