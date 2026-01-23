@@ -142,23 +142,26 @@ BRMS_DIR="QBRMS_MURPHYXP"
 # 2. Get today's date in the format AWS CLI uses (YYYY-MM-DD)
 TODAY=$(date +%Y-%m-%d)
 
-echo "→ Verifying backups in s3://${COS_BUCKET}/${BRMS_DIR}/ for date: $TODAY..."
+# ------------------------------------------------------------------------------
+# STEP 55: Verify Cloud Upload (Syntax & Timezone Corrected)
+# ------------------------------------------------------------------------------
+echo "→ [STEP 55] Verifying backups in s3://${COS_BUCKET}/${BRMS_DIR}/..."
 
-# 3. Run the check remotely
-# We list the *directory*, grep for today's date, and count the results.
-VERIFY_CMD="export PATH=/QOpenSys/pkgs/bin:\$PATH; \
-            aws --endpoint-url=${COS_ENDPOINT} s3 ls s3://${COS_BUCKET}/${BRMS_DIR}/ | grep \"$TODAY\""
+# 1. Define the command with fixed 'bsh' syntax and remote date calculation.
+#    Note: We use 'PATH=...; export PATH' because 'export PATH=...' fails on IBM i bsh.
+#    Note: We escape \$(date) so it runs on the IBM i (remote time), not the container (UTC).
+VERIFY_CMD="PATH=/QOpenSys/pkgs/bin:\$PATH; export PATH; \
+            aws --endpoint-url=${COS_ENDPOINT} s3 ls s3://${COS_BUCKET}/${BRMS_DIR}/ | grep \$(date +%Y-%m-%d)"
 
-# Execute and capture output
-UPLOAD_LIST=$(ssh -i "$VSI_KEY_FILE" $SSH_OPTS ${SSH_USER}@${VSI_IP} \
-   "ssh -i /home/${SSH_USER}/.ssh/id_ed25519_vsi $SSH_OPTS ${SSH_USER}@${IBMI_CLONE_IP} '$VERIFY_CMD'")
-
-# 4. Validate results
-if [[ -n "$UPLOAD_LIST" ]]; then
-    echo "✓ SUCCESS: Found BRMS volumes uploaded today:"
-    echo "$UPLOAD_LIST"
+# 2. Execute remotely and check exit code directly
+#    If grep finds the date, it returns 0 (Success). If not, it returns 1 (Fail).
+if ssh -i "$VSI_KEY_FILE" $SSH_OPTS ${SSH_USER}@${VSI_IP} \
+   "ssh -i /home/${SSH_USER}/.ssh/id_ed25519_vsi $SSH_OPTS ${SSH_USER}@${IBMI_CLONE_IP} \
+   \"$VERIFY_CMD\""; then
+   
+    echo "✓ SUCCESS: Found backup volumes uploaded with today's (IBM i local) timestamp."
 else
-    echo "✗ FAILURE: No backup volumes found in s3://${COS_BUCKET}/${BRMS_DIR}/ with timestamp $TODAY."
+    echo "✗ FAILURE: No backup volumes found matching the IBM i system date."
     exit 1
 fi
 
