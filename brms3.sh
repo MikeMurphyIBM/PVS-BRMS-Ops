@@ -26,7 +26,7 @@ set -eu
 ################################################################################
 echo ""
 echo "========================================================================"
-echo " JOB 3: BRMS BACKUP OPERATIONS v75"
+echo " JOB 3: BRMS BACKUP OPERATIONS v76"
 echo " Purpose: Execute cloud backups and synchronize BRMS history"
 echo "========================================================================"
 echo ""
@@ -145,30 +145,61 @@ TODAY=$(date +%Y-%m-%d)
 # ------------------------------------------------------------------------------
 # STEP 55: Verify Cloud Upload (bsh Compatible)
 # ------------------------------------------------------------------------------
+# STEP 55: Verify Cloud Upload (Polling Loop)
+# ------------------------------------------------------------------------------
 echo "→ [STEP 55] Verifying backups in s3://${COS_BUCKET}/${BRMS_DIR}/..."
+echo "  Starting polling loop. Will check every 5 minutes for up to 1 hour."
 
-# DEBUG: List all files first so you can see what is actually there in the logs
-echo "  (Debug) Listing contents of bucket directory:"
-ssh -i "$VSI_KEY_FILE" $SSH_OPTS ${SSH_USER}@${VSI_IP} \
-   "ssh -i /home/${SSH_USER}/.ssh/id_ed25519_vsi $SSH_OPTS ${SSH_USER}@${IBMI_CLONE_IP} \
-   'PATH=/QOpenSys/pkgs/bin:\$PATH; export PATH; aws --endpoint-url=${COS_ENDPOINT} s3 ls s3://${COS_BUCKET}/${BRMS_DIR}/'"
+# Configuration
+MAX_RETRIES=15       # 15 checks * 5 minutes = 75 minutes max
+SLEEP_SECONDS=300    # 5 minutes in seconds
+FOUND_FILES=""
 
-# VERIFICATION:
-# We use backticks `date ...` instead of $(date ...) for bsh compatibility.
-# We use 'if' directly on the ssh command to handle the exit code gracefully.
-VERIFY_CMD="PATH=/QOpenSys/pkgs/bin:\$PATH; export PATH; \
-            aws --endpoint-url=${COS_ENDPOINT} s3 ls s3://${COS_BUCKET}/${BRMS_DIR}/ | grep \`date +%Y-%m-%d\`"
+# Start the loop
+for ((i=1; i<=MAX_RETRIES; i++)); do
+    echo "  [Attempt $i/$MAX_RETRIES] Checking for backup files..."
 
-if ssh -i "$VSI_KEY_FILE" $SSH_OPTS ${SSH_USER}@${VSI_IP} \
-   "ssh -i /home/${SSH_USER}/.ssh/id_ed25519_vsi $SSH_OPTS ${SSH_USER}@${IBMI_CLONE_IP} \
-   \"$VERIFY_CMD\""; then
-   
-    echo "✓ SUCCESS: Found backup volumes uploaded with today's (IBM i local) timestamp."
+    # 1. Define the remote command
+    #    - Sets PATH for IBM i PASE
+    #    - Lists the S3 bucket directory
+    #    - Greps for today's date (calculated on IBM i to match local timezone)
+    #    - Uses awk to extract the 4th column (the filename)
+    CHECK_CMD="PATH=/QOpenSys/pkgs/bin:\$PATH; export PATH; \
+               aws --endpoint-url=${COS_ENDPOINT} s3 ls s3://${COS_BUCKET}/${BRMS_DIR}/ | \
+               grep \`date +%Y-%m-%d\` | \
+               awk '{print \$4}'"
+
+    # 2. Execute via SSH and capture the output (filenames)
+    #    We use '|| true' to ensure the script doesn't crash if grep finds nothing yet.
+    FOUND_FILES=$(ssh -i "$VSI_KEY_FILE" $SSH_OPTS ${SSH_USER}@${VSI_IP} \
+       "ssh -i /home/${SSH_USER}/.ssh/id_ed25519_vsi $SSH_OPTS ${SSH_USER}@${IBMI_CLONE_IP} \
+       \"$CHECK_CMD\"") || true
+
+    # 3. Check if we found anything
+    if [ -n "$FOUND_FILES" ]; then
+        echo "  ✓ Backup files detected!"
+        break
+    fi
+
+    # 4. If not found, check if this was the last attempt
+    if [ $i -lt $MAX_RETRIES ]; then
+        echo "  ...No files found yet. Waiting 5 minutes..."
+        sleep $SLEEP_SECONDS
+    fi
+done
+
+# 5. Final Validation
+if [ -n "$FOUND_FILES" ]; then
+    echo "✓ SUCCESS: The following BRMS backup volumes were found in the cloud:"
+    echo "---------------------------------------------------"
+    echo "$FOUND_FILES"
+    echo "---------------------------------------------------"
 else
-    echo "✗ FAILURE: No backup volumes found matching the IBM i system date."
-    echo "  Check the Debug output above to see what files are actually in the bucket."
+    echo "✗ FAILURE: Timed out after 75 minutes. No backup volumes found for today."
+    echo "  Please check BRMS logs on the partition or the COS bucket manually."
     exit 1
 fi
+
 
 # ------------------------------------------------------------------------------
 # STEP 13: Save QUSRBRM to Save File
