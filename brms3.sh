@@ -142,8 +142,7 @@ BRMS_DIR="QBRMS_MURPHYXP"
 # 2. Get today's date in the format AWS CLI uses (YYYY-MM-DD)
 TODAY=$(date +%Y-%m-%d)
 
-# ------------------------------------------------------------------------------
-# STEP 55: Verify Cloud Upload (bsh Compatible)
+
 # ------------------------------------------------------------------------------
 # STEP 55: Verify Cloud Upload (Polling Loop)
 # ------------------------------------------------------------------------------
@@ -160,17 +159,15 @@ for ((i=1; i<=MAX_RETRIES; i++)); do
     echo "  [Attempt $i/$MAX_RETRIES] Checking for backup files..."
 
     # 1. Define the remote command
-    #    - Sets PATH for IBM i PASE
-    #    - Lists the S3 bucket directory
-    #    - Greps for today's date (calculated on IBM i to match local timezone)
-    #    - Uses awk to extract the 4th column (the filename)
-    CHECK_CMD="PATH=/QOpenSys/pkgs/bin:\$PATH; export PATH; \
+    #    FIX: Added ':/QOpenSys/usr/bin' to the PATH so 'awk' can be found.
+    #    - aws is in /QOpenSys/pkgs/bin
+    #    - awk is in /QOpenSys/usr/bin
+    CHECK_CMD="PATH=/QOpenSys/pkgs/bin:/QOpenSys/usr/bin:\$PATH; export PATH; \
                aws --endpoint-url=${COS_ENDPOINT} s3 ls s3://${COS_BUCKET}/${BRMS_DIR}/ | \
                grep \`date +%Y-%m-%d\` | \
                awk '{print \$4}'"
 
     # 2. Execute via SSH and capture the output (filenames)
-    #    We use '|| true' to ensure the script doesn't crash if grep finds nothing yet.
     FOUND_FILES=$(ssh -i "$VSI_KEY_FILE" $SSH_OPTS ${SSH_USER}@${VSI_IP} \
        "ssh -i /home/${SSH_USER}/.ssh/id_ed25519_vsi $SSH_OPTS ${SSH_USER}@${IBMI_CLONE_IP} \
        \"$CHECK_CMD\"") || true
@@ -195,7 +192,7 @@ if [ -n "$FOUND_FILES" ]; then
     echo "$FOUND_FILES"
     echo "---------------------------------------------------"
 else
-    echo "✗ FAILURE: Timed out after 75 minutes. No backup volumes found for today."
+    echo "✗ FAILURE: Timed out after 1 hour. No backup volumes found for today."
     echo "  Please check BRMS logs on the partition or the COS bucket manually."
     exit 1
 fi
