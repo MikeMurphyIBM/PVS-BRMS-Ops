@@ -143,79 +143,26 @@ echo ""
 # STEP 55: Verify Cloud Upload (Optimized)
 # ------------------------------------------------------------------------------
 # ------------------------------------------------------------------------------
-# STEP 55: Verify Cloud Upload (Optimized)
+# OPTION 1: Find the single most recent file in the bucket directory
 # ------------------------------------------------------------------------------
-echo "→ [STEP 55] Verifying backup files in Cloud Object Storage..."
+echo "→ Verifying latest cloud object..."
 
-# 1. Configuration
-SYSTEM_NAME="MURPHYXP"
-COS_DIR="QBRMS_${SYSTEM_NAME}"
-# Note: POLL_INTERVAL and MAX_RETRIES already defined at top of script
+# 1. List files recursively
+# 2. Sort by date (column 1 and 2)
+# 3. Tail -n 1 gets the very last (newest) line
+# 4. Awk prints the filename (usually the 4th column in standard output)
 
-# ------------------------------------------------------------------------------
-# STEP 55: Verify Cloud Upload
-# ------------------------------------------------------------------------------
-echo "→ [STEP 55] Verifying backup files in Cloud Object Storage..."
+LATEST_FILE=$(ssh -i "$VSI_KEY_FILE" $SSH_OPTS ${SSH_USER}@${VSI_IP} \
+ "ssh -i /home/${SSH_USER}/.ssh/id_ed25519_vsi $SSH_OPTS ${SSH_USER}@${IBMI_CLONE_IP} \
+ 'PATH=/QOpenSys/pkgs/bin:\$PATH; export PATH; \
+  aws --endpoint-url=${COS_ENDPOINT} s3 ls s3://${COS_BUCKET}/${COS_DIR}/ --recursive | sort | tail -n 1 | awk \"{print \\\$4}\"'")
 
-# 1. Generate Time Regex (Local Calculation using Container's Python)
-echo "  Calculating search time window (Local Python)..."
-
-TIME_SEARCH_PATTERN=$(python3 -c 'import datetime; \
-now = datetime.datetime.now(); \
-h0 = now.strftime("%Y-%m-%d %H"); \
-h1 = (now - datetime.timedelta(hours=1)).strftime("%Y-%m-%d %H"); \
-h2 = (now - datetime.timedelta(hours=2)).strftime("%Y-%m-%d %H"); \
-print(h0 + "|" + h1 + "|" + h2)')
-
-echo "  Search Pattern: '$TIME_SEARCH_PATTERN'"
-echo "  Target Bucket:  s3://${COS_BUCKET}/${COS_DIR}/"
-
-# 2. Polling Loop
-count=0
-found_files=false
-
-while [ $count -lt $MAX_RETRIES ]; do
-    echo "  Attempt $((count+1)) of $MAX_RETRIES: Checking bucket..."
-
-    # Remote check using AWS CLI on the IBM i
-    # We export PATH to ensure 'aws' is found in /QOpenSys/pkgs/bin
-    REMOTE_CHECK="export PATH=/QOpenSys/pkgs/bin:\$PATH; \
-                  aws --endpoint-url=${COS_ENDPOINT} s3 ls s3://${COS_BUCKET}/${COS_DIR}/ | grep -E '$TIME_SEARCH_PATTERN' | grep ' Q'"
-
-    # We use || true to prevent the script from exiting if grep finds nothing (exit code 1)
-    UPLOAD_RESULT=$(ssh -i "$VSI_KEY_FILE" $SSH_OPTS ${SSH_USER}@${VSI_IP} "$REMOTE_CHECK" || true)
-
-    if [[ -n "$UPLOAD_RESULT" ]]; then
-        found_files=true
-        break # Exit loop on success
-    fi
-
-    if [ $((count+1)) -lt $MAX_RETRIES ]; then
-        echo "    No files found yet. Waiting $POLL_INTERVAL seconds..."
-        sleep $POLL_INTERVAL
-    fi
-    ((count++))
-done
-
-# 3. Final Validation
-if [ "$found_files" = true ]; then
-    SAVED_FILES=$(echo "$UPLOAD_RESULT" | awk '{print $NF}')
-    FILE_COUNT=$(echo "$SAVED_FILES" | wc -l)
-    
-    echo "✓ SUCCESS: Verified $FILE_COUNT volume(s) uploaded successfully."
-    echo "---------------------------------------------------"
-    echo " COMPLETION SUMMARY: VOLUMES UPLOADED"
-    echo "---------------------------------------------------"
-    echo "$SAVED_FILES"
-    echo "---------------------------------------------------"
-else
-    echo "✗ FAILURE: Timed out waiting for files after $((MAX_RETRIES * POLL_INTERVAL / 60)) minutes."
-    echo "  Troubleshooting:"
-    echo "  1. Check if 'aws' is configured on IBM i (run 'aws configure' via SSH)."
-    echo "  2. Verify the IBM i can reach the COS Endpoint: ${COS_ENDPOINT}."
+if [[ -z "$LATEST_FILE" ]]; then
+    echo "✗ FAILURE: No files found in s3://${COS_BUCKET}/${COS_DIR}/"
     exit 1
+else
+    echo "✓ SUCCESS: Found latest backup object: $LATEST_FILE"
 fi
-echo ""
 # ------------------------------------------------------------------------------
 # STEP 13: Save QUSRBRM to Save File
 # ------------------------------------------------------------------------------
