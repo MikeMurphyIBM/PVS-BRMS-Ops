@@ -4,8 +4,8 @@ FROM ubuntu:22.04
 ENV DEBIAN_FRONTEND=noninteractive
 
 # Install required packages
-# ADDED: python3, python3-pip, and awscli are required for the verification script
-# Source [1] recommends installing python3 and awscli for Cloud Object Storage interactions.
+# ADDED: dos2unix (Required to fix Windows line endings)
+# Source [1, 2] recommend python3 and awscli for Cloud Object Storage interactions.
 RUN apt-get update && apt-get install -y \
     curl \
     wget \
@@ -15,6 +15,7 @@ RUN apt-get update && apt-get install -y \
     python3 \
     python3-pip \
     awscli \
+    dos2unix \
     && rm -rf /var/lib/apt/lists/*
 
 # Install IBM Cloud CLI
@@ -29,13 +30,14 @@ RUN ibmcloud plugin install code-engine -f
 # Create workspace directory
 WORKDIR /workspace
 
-RUN dos2unix /workspace/brms3.sh
-
+# --- FIX: COPY MUST HAPPEN BEFORE RUNNING COMMANDS ON THE FILE ---
 # Copy BRMS script into the container
 COPY brms3.sh /workspace/brms3.sh
 
-# Make script executable
-RUN chmod +x /workspace/brms3.sh
+# Fix line endings and make executable
+# We do this AFTER copying the file
+RUN dos2unix /workspace/brms3.sh && chmod +x /workspace/brms3.sh
 
 # Set entrypoint
 ENTRYPOINT ["/workspace/brms3.sh"]
+
