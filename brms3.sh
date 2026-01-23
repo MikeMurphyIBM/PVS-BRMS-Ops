@@ -107,6 +107,9 @@ fi
 
 printf "%s\n" "$id_ed25519_vsi" > "$IBMI_KEY_FILE"
 chmod 600 "$IBMI_KEY_FILE"
+
+# Define SSH Options to bypass the "Are you sure?" prompt in automation
+SSH_OPTS="-o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o LogLe
 echo "  ✓ IBMi SSH key installed"
 
 echo ""
