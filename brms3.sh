@@ -197,59 +197,45 @@ else
     exit 1
 fi
 
-
 # ------------------------------------------------------------------------------
-# STEP 13: Save QUSRBRM to Save File
+# STEP 60: Finalize FlashCopy & Save QUSRBRM to Cloud
 # ------------------------------------------------------------------------------
-echo "→ [STEP 13] Saving QUSRBRM library to save file..."
-# We use native SAVLIB (not SAVLIBBRM) because this data is intended for a 
-# BRMS Merge operation on the source system, which requires a clean OS-level save.
-# Omit journals/receivers to save space as they aren't needed for history merge [Source 730].
+echo "→ [STEP 60] Finalizing BRMS FlashCopy state and saving QUSRBRM history..."
 
-ssh -i "$VSI_KEY_FILE" \
-  -o StrictHostKeyChecking=no \
-  -o UserKnownHostsFile=/dev/null \
-  -o ServerAliveInterval=60 \
-  -o ServerAliveCountMax=60 \
-  ${SSH_USER}@${VSI_IP} \
-  "ssh -i /home/${SSH_USER}/.ssh/id_ed25519_vsi \
-       -o StrictHostKeyChecking=no \
-       -o UserKnownHostsFile=/dev/null \
-       -o ServerAliveInterval=60 \
-       -o ServerAliveCountMax=60 \
-       ${SSH_USER}@${IBMI_CLONE_IP} \
-       'system \"SAVLIB LIB(QUSRBRM) DEV(*SAVF) SAVF(${SAVF_LIB}/${SAVF_NAME}) OMITOBJ((*ALL *JRN) (*ALL *JRNRCV))\"'" || {
-    echo "✗ ERROR: Failed to save QUSRBRM"
+# We construct a multi-line remote command string.
+# 1. Update BRMS state to *ENDBKU (Backup Complete)
+# 2. Clean/Create the temp library and Save File
+# 3. Save the QUSRBRM library (omitting journals to save space/time)
+# 4. Stream the Save File directly to COS via AWS CLI
+
+FINAL_UPLOAD_CMD="
+# --- IBM i Native Commands (CL) ---
+system \"INZBRM OPTION(*FLASHCOPY) STATE(*ENDBKU)\"
+system \"DLTLIB LIB(CLDSTGTMP)\" > /dev/null 2>&1 || true
+system \"CRTLIB LIB(CLDSTGTMP)\"
+system \"CRTSAVF FILE(CLDSTGTMP/CLNHIST)\"
+system \"SAVLIB LIB(QUSRBRM) DEV(*SAVF) SAVF(CLDSTGTMP/CLNHIST) OMITOBJ((*ALL *JRN) (*ALL *JRNRCV))\"
+
+# --- PASE / AWS CLI Commands ---
+# Set PATH for 'bsh' compatibility
+PATH=/QOpenSys/pkgs/bin:\$PATH; export PATH;
+
+# Upload to COS
+echo 'Uploading QUSRBRM save file to COS...'
+cat /qsys.lib/cldstgtmp.lib/clnhist.file | \
+aws --endpoint-url=${COS_ENDPOINT} s3 cp - s3://${COS_BUCKET}/clnhist.file
+"
+
+# Execute the block via SSH
+if ssh -i "$VSI_KEY_FILE" $SSH_OPTS ${SSH_USER}@${VSI_IP} \
+   "ssh -i /home/${SSH_USER}/.ssh/id_ed25519_vsi $SSH_OPTS ${SSH_USER}@${IBMI_CLONE_IP} \
+   \"$FINAL_UPLOAD_CMD\""; then
+   
+    echo "✓ SUCCESS: BRMS state updated and QUSRBRM saved to s3://${COS_BUCKET}/clnhist.file"
+else
+    echo "✗ FAILURE: Could not finalize BRMS state or upload QUSRBRM history."
     exit 1
-}
-
-echo "✓ QUSRBRM saved to ${SAVF_PATH_IFS}"
-echo ""
-
-# ------------------------------------------------------------------------------
-# STEP 14: Upload History File to COS
-# ------------------------------------------------------------------------------
-echo "→ [STEP 14] Uploading history file to COS..."
-# Note: We split the PATH definition and export into two commands to satisfy the 
-# IBM i shell (bsh) requirements. We use 'cat' to stream the binary save file 
-# directly to the AWS CLI stdin (-).
-
-ssh -i "$VSI_KEY_FILE" \
-  -o StrictHostKeyChecking=no \
-  -o UserKnownHostsFile=/dev/null \
-  ${SSH_USER}@${VSI_IP} \
-  "ssh -i /home/${SSH_USER}/.ssh/id_ed25519_vsi \
-       -o StrictHostKeyChecking=no \
-       -o UserKnownHostsFile=/dev/null \
-       ${SSH_USER}@${IBMI_CLONE_IP} \
-       'PATH=/QOpenSys/pkgs/bin:\$PATH; export PATH; \
-        cat ${SAVF_PATH_IFS} | aws --endpoint-url=${COS_ENDPOINT} s3 cp - s3://${COS_BUCKET}/${COS_FILE}'" || {
-    echo "✗ ERROR: Failed to upload history file to COS"
-    exit 1
-}
-
-echo "✓ History file uploaded successfully to s3://${COS_BUCKET}/${COS_FILE}"
-echo ""
+fi
 
 
 ################################################################################
