@@ -481,50 +481,47 @@ echo " Source LPAR Operations Complete"
 echo "------------------------------------------------------------------------"
 echo ""
 
-################################################################################
-# COMPLETION SUMMARY
-################################################################################
-echo ""
+# ------------------------------------------------------------------------------
+# JOB SUMMARY
+# ------------------------------------------------------------------------------
 echo "========================================================================"
-echo " JOB 3: COMPLETION SUMMARY"
+echo "              BRMS FLASHCOPY BACKUP JOB COMPLETION REPORT"
 echo "========================================================================"
 echo ""
-echo "  Status:              ✓ SUCCESS"
-echo "  ────────────────────────────────────────────────────────────────"
+echo "1. BRMS FLASHCOPY STATE:"
+echo "   Source LPAR: *ENDPRC (Process Complete)"
+echo "   Clone LPAR:  *ENDBKU (Backup Complete)"
 echo ""
-echo "  CLONE LPAR OPERATIONS (${IBMI_CLONE_IP})"
-echo "    • BRMS State:           *STRBKU → *ENDBKU" 
-# This indicates the clone has finished its backup role [Source 483].
-echo "    • Control Group 1:      ${CONTROL_GROUP_1} ✓"
-echo "    • Control Group 2:      ${CONTROL_GROUP_2} ✓"
-echo "    • BRMS Maintenance:     MOVMED(*YES) ✓"
-echo "    • Cloud Transfer:"
-echo "        - Poll Attempts:    ${POLL_COUNT}"
-echo "        - Volumes Uploaded: ${VOLUME_COUNT}"
-if [ -n "$VOLUMES_IN_TRANSFER" ] && [ "$VOLUME_COUNT" -gt 0 ]; then
-    echo "        - Volume Names:"
-    echo "$VOLUMES_IN_TRANSFER" | sed 's/^/            /'
+echo "2. CONTROL GROUPS PROCESSED:"
+echo "   - QCLDBUSR01 (User Data)"
+echo "   - QCLDBGRP01 (Group Data)"
+echo ""
+echo "3. CLOUD TRANSFER DETAILS:"
+echo "   ✓ Cloud Object Storage transfer successful."
+echo "   ✓ Target Bucket: s3://${COS_BUCKET}"
+echo ""
+echo "   [Uploaded Backup Volumes]"
+echo "   ---------------------------------------------------"
+if [ -n "$FOUND_FILES" ]; then
+    echo "$FOUND_FILES"
+else
+    echo "   (No volume names captured in polling variable)"
 fi
-echo "    • QUSRBRM Saved:        ${SAVF_LIB}/${SAVF_NAME}"
-echo "    • Uploaded to COS:      s3://${COS_BUCKET}/${COS_FILE} ✓"
+echo "   ---------------------------------------------------"
 echo ""
-echo "  SOURCE LPAR OPERATIONS (${IBMI_SOURCE_IP})"
-echo "    • BRMS History Merged:       Yes ✓"
-# Confirms production DB now contains the clone's backup records [Source 600].
-echo "    • BRMS State:           *ENDPRC (Normal operations) ✓"
-# Confirms the source has exited FlashCopy mode and resumed networking [Source 485].
-echo "    • Cleanup:              All temporary objects deleted ✓"
+echo "4. HISTORY SYNCHRONIZATION:"
+echo "   ✓ QUSRBRM downloaded from COS to Source."
+echo "   ✓ Restored to temporary library CLDSTGTMP."
+echo "   ✓ History merged into active BRMS database."
 echo ""
-echo "  ────────────────────────────────────────────────────────────────"
-echo "  COS Bucket:         ${COS_BUCKET}"
-echo "  COS File:           ${COS_FILE}"
-echo "  ────────────────────────────────────────────────────────────────"
+echo "5. CLEANUP:"
+echo "   ✓ Temporary resources removed from Source and Clone."
 echo ""
+echo "========================================================================"
 echo "  ✓ All BRMS FlashCopy operations completed successfully"
 echo "  ✓ Backup history synchronized between LPARs"
 echo "  ✓ Production system ready for normal operations"
-echo ""
 echo "========================================================================"
-echo ""
 
+# Explicitly exit with 0 to tell Code Engine the job Succeeded
 exit 0
