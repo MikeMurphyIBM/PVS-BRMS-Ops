@@ -198,45 +198,57 @@ else
 fi
 
 # ------------------------------------------------------------------------------
-# STEP 60: Finalize FlashCopy & Save QUSRBRM to Cloud
+# STEP 60: Finalize FlashCopy & Save QUSRBRM (Granular execution)
 # ------------------------------------------------------------------------------
 echo "→ [STEP 60] Finalizing BRMS FlashCopy state and saving QUSRBRM history..."
 
-# We construct a multi-line remote command string.
-# 1. Update BRMS state to *ENDBKU (Backup Complete)
-# 2. Clean/Create the temp library and Save File
-# 3. Save the QUSRBRM library (omitting journals to save space/time)
-# 4. Stream the Save File directly to COS via AWS CLI
+# 60a. Update BRMS State to *ENDBKU
+# This tells BRMS the backup is finished so the history is marked complete.
+echo "  [60a] Setting BRMS state to *ENDBKU..."
+ssh -i "$VSI_KEY_FILE" $SSH_OPTS ${SSH_USER}@${VSI_IP} \
+   "ssh -i /home/${SSH_USER}/.ssh/id_ed25519_vsi $SSH_OPTS ${SSH_USER}@${IBMI_CLONE_IP} \
+   'system \"INZBRM OPTION(*FLASHCOPY) STATE(*ENDBKU)\"'" || {
+   echo "✗ FAILURE: Could not set BRMS state to *ENDBKU."
+   exit 1
+}
 
-FINAL_UPLOAD_CMD="
-# --- IBM i Native Commands (CL) ---
-system \"INZBRM OPTION(*FLASHCOPY) STATE(*ENDBKU)\"
-system \"DLTLIB LIB(CLDSTGTMP)\" > /dev/null 2>&1 || true
-system \"CRTLIB LIB(CLDSTGTMP)\"
-system \"CRTSAVF FILE(CLDSTGTMP/CLNHIST)\"
-system \"SAVLIB LIB(QUSRBRM) DEV(*SAVF) SAVF(CLDSTGTMP/CLNHIST) OMITOBJ((*ALL *JRN) (*ALL *JRNRCV))\"
+# 60b. Prepare Scratch Library (CLDSTGTMP)
+# We use '|| true' on DLTLIB so the script doesn't fail if the library doesn't exist yet.
+echo "  [60b] preparing temporary library CLDSTGTMP..."
+ssh -i "$VSI_KEY_FILE" $SSH_OPTS ${SSH_USER}@${VSI_IP} \
+   "ssh -i /home/${SSH_USER}/.ssh/id_ed25519_vsi $SSH_OPTS ${SSH_USER}@${IBMI_CLONE_IP} \
+   'system \"DLTLIB LIB(CLDSTGTMP)\" > /dev/null 2>&1 || true; \
+    system \"CRTLIB LIB(CLDSTGTMP)\"; \
+    system \"CRTSAVF FILE(CLDSTGTMP/CLNHIST)\"'" || {
+   echo "✗ FAILURE: Could not create temporary library or save file."
+   exit 1
+}
 
-# --- PASE / AWS CLI Commands ---
-# Set PATH for 'bsh' compatibility
-PATH=/QOpenSys/pkgs/bin:\$PATH; export PATH;
+# 60c. Save QUSRBRM to the Save File
+# We omit journals to save space/time as they aren't strictly needed for history merging.
+echo "  [60c] Saving QUSRBRM to save file..."
+ssh -i "$VSI_KEY_FILE" $SSH_OPTS ${SSH_USER}@${VSI_IP} \
+   "ssh -i /home/${SSH_USER}/.ssh/id_ed25519_vsi $SSH_OPTS ${SSH_USER}@${IBMI_CLONE_IP} \
+   'system \"SAVLIB LIB(QUSRBRM) DEV(*SAVF) SAVF(CLDSTGTMP/CLNHIST) OMITOBJ((*ALL *JRN) (*ALL *JRNRCV))\"'" || {
+   echo "✗ FAILURE: Could not save QUSRBRM library."
+   exit 1
+}
 
-# Upload to COS
-echo 'Uploading QUSRBRM save file to COS...'
-cat /qsys.lib/cldstgtmp.lib/clnhist.file | \
-aws --endpoint-url=${COS_ENDPOINT} s3 cp - s3://${COS_BUCKET}/clnhist.file
-"
+# 60d. Upload the Save File to Cloud Object Storage
+# We use the specific PATH export required for the PASE shell.
+echo "  [60d] Uploading QUSRBRM save file to COS..."
+UPLOAD_CMD="PATH=/QOpenSys/pkgs/bin:\$PATH; export PATH; \
+            cat /qsys.lib/cldstgtmp.lib/clnhist.file | \
+            aws --endpoint-url=${COS_ENDPOINT} s3 cp - s3://${COS_BUCKET}/clnhist.file"
 
-# Execute the block via SSH
 if ssh -i "$VSI_KEY_FILE" $SSH_OPTS ${SSH_USER}@${VSI_IP} \
    "ssh -i /home/${SSH_USER}/.ssh/id_ed25519_vsi $SSH_OPTS ${SSH_USER}@${IBMI_CLONE_IP} \
-   \"$FINAL_UPLOAD_CMD\""; then
-   
-    echo "✓ SUCCESS: BRMS state updated and QUSRBRM saved to s3://${COS_BUCKET}/clnhist.file"
+   \"$UPLOAD_CMD\""; then
+    echo "✓ SUCCESS: QUSRBRM history uploaded successfully."
 else
-    echo "✗ FAILURE: Could not finalize BRMS state or upload QUSRBRM history."
+    echo "✗ FAILURE: Could not upload QUSRBRM to Cloud Object Storage."
     exit 1
 fi
-
 
 ################################################################################
 # SOURCE LPAR OPERATIONS
