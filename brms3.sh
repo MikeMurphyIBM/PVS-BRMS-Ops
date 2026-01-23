@@ -109,7 +109,7 @@ printf "%s\n" "$id_ed25519_vsi" > "$IBMI_KEY_FILE"
 chmod 600 "$IBMI_KEY_FILE"
 
 # Define SSH Options to bypass the "Are you sure?" prompt in automation
-SSH_OPTS="-o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o LogLe
+SSH_OPTS="-o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o LogLevel=ERROR"
 echo "  ✓ IBMi SSH key installed"
 
 echo ""
@@ -129,40 +129,39 @@ echo ""
 
 
 
+# ------------------------------------------------------------------------------
+# ------------------------------------------------------------------------------
+# REVISED OPTION: Check the BRMS Directory for ANY file updated today
+# ------------------------------------------------------------------------------
 
-# ------------------------------------------------------------------------------
-# STEP 10: Poll for Transfer Completion (5 min interval, 15 attempts max)
-# ------------------------------------------------------------------------------
-# ------------------------------------------------------------------------------
-# STEP 10: Poll for Transfer Completion
-# ------------------------------------------------------------------------------
-# ------------------------------------------------------------------------------
-# STEP 10: Verify Cloud Upload (Polling every 5 minutes)
-# ------------------------------------------------------------------------------
-# ------------------------------------------------------------------------------
-# STEP 55: Verify Cloud Upload (Optimized)
-# ------------------------------------------------------------------------------
-# ------------------------------------------------------------------------------
-# OPTION 1: Find the single most recent file in the bucket directory
-# ------------------------------------------------------------------------------
-echo "→ Verifying latest cloud object..."
+# 1. Define the BRMS directory structure based on your system name
+# BRMS stores files in a folder named QBRMS_{SystemName} [Source 88, 1517]
+# Assuming your system name is MURPHYXP based on your query.
+BRMS_DIR="QBRMS_MURPHYXP"
 
-# 1. List files recursively
-# 2. Sort by date (column 1 and 2)
-# 3. Tail -n 1 gets the very last (newest) line
-# 4. Awk prints the filename (usually the 4th column in standard output)
+# 2. Get today's date in the format AWS CLI uses (YYYY-MM-DD)
+TODAY=$(date +%Y-%m-%d)
 
-LATEST_FILE=$(ssh -i "$VSI_KEY_FILE" $SSH_OPTS ${SSH_USER}@${VSI_IP} \
- "ssh -i /home/${SSH_USER}/.ssh/id_ed25519_vsi $SSH_OPTS ${SSH_USER}@${IBMI_CLONE_IP} \
- 'PATH=/QOpenSys/pkgs/bin:\$PATH; export PATH; \
-  aws --endpoint-url=${COS_ENDPOINT} s3 ls s3://${COS_BUCKET}/${COS_DIR}/ --recursive | sort | tail -n 1 | awk \"{print \\\$4}\"'")
+echo "→ Verifying backups in s3://${COS_BUCKET}/${BRMS_DIR}/ for date: $TODAY..."
 
-if [[ -z "$LATEST_FILE" ]]; then
-    echo "✗ FAILURE: No files found in s3://${COS_BUCKET}/${COS_DIR}/"
-    exit 1
+# 3. Run the check remotely
+# We list the *directory*, grep for today's date, and count the results.
+VERIFY_CMD="export PATH=/QOpenSys/pkgs/bin:\$PATH; \
+            aws --endpoint-url=${COS_ENDPOINT} s3 ls s3://${COS_BUCKET}/${BRMS_DIR}/ | grep \"$TODAY\""
+
+# Execute and capture output
+UPLOAD_LIST=$(ssh -i "$VSI_KEY_FILE" $SSH_OPTS ${SSH_USER}@${VSI_IP} \
+   "ssh -i /home/${SSH_USER}/.ssh/id_ed25519_vsi $SSH_OPTS ${SSH_USER}@${IBMI_CLONE_IP} '$VERIFY_CMD'")
+
+# 4. Validate results
+if [[ -n "$UPLOAD_LIST" ]]; then
+    echo "✓ SUCCESS: Found BRMS volumes uploaded today:"
+    echo "$UPLOAD_LIST"
 else
-    echo "✓ SUCCESS: Found latest backup object: $LATEST_FILE"
+    echo "✗ FAILURE: No backup volumes found in s3://${COS_BUCKET}/${BRMS_DIR}/ with timestamp $TODAY."
+    exit 1
 fi
+
 # ------------------------------------------------------------------------------
 # STEP 13: Save QUSRBRM to Save File
 # ------------------------------------------------------------------------------
