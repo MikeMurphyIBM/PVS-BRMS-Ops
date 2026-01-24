@@ -26,7 +26,7 @@ set -eu
 ################################################################################
 echo ""
 echo "========================================================================"
-echo " JOB 3: BRMS BACKUP OPERATIONS v4"
+echo " JOB 3: BRMS BACKUP OPERATIONS v1"
 echo " Purpose: Execute cloud backups and synchronize BRMS history"
 echo "========================================================================"
 echo ""
