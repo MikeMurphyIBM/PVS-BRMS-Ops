@@ -109,6 +109,13 @@ printf "%s\n" "$id_ed25519_vsi" > "$IBMI_KEY_FILE"
 chmod 600 "$IBMI_KEY_FILE"
 echo "  ✓ IBMi SSH key installed"
 
+# ------------------------------------------------------------------------------
+# SSH Configuration
+# ------------------------------------------------------------------------------
+# Define common SSH options to prevent interactive prompts and timeouts
+
+SSH_OPTS="-o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ServerAliveInterval=60 -o ServerAliveCountMax=60"
+
 echo ""
 echo "------------------------------------------------------------------------"
 echo " Stage 1 Complete: SSH keys installed"
