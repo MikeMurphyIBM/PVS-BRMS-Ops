@@ -114,7 +114,7 @@ echo "  ✓ IBMi SSH key installed"
 # ------------------------------------------------------------------------------
 # Define common SSH options to prevent interactive prompts and timeouts
 
-SSH_OPTS="-o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ServerAliveInterval=60 -o ServerAliveCountMax=60"
+SSH_OPTS="-q -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ServerAliveInterval=60 -o ServerAliveCountMax=60"
 
 echo ""
 echo "------------------------------------------------------------------------"
@@ -140,11 +140,11 @@ echo "→ [STEP 2] Setting BRMS state to *STRBKU..."
 # This command informs the clone LPAR that it is in FlashCopy mode 
 # and ready to perform backups.
 
-ssh -i "$VSI_KEY_FILE" \
+ssh -q -i "$VSI_KEY_FILE" \
   -o StrictHostKeyChecking=no \
   -o UserKnownHostsFile=/dev/null \
   ${SSH_USER}@${VSI_IP} \
-  "ssh -i /home/${SSH_USER}/.ssh/id_ed25519_vsi \
+  "ssh -q -i /home/${SSH_USER}/.ssh/id_ed25519_vsi \
        -o StrictHostKeyChecking=no \
        -o UserKnownHostsFile=/dev/null \
        ${SSH_USER}@${IBMI_CLONE_IP} \
@@ -164,11 +164,11 @@ echo "→ [STEP 3] Starting ICC/COS subsystem..."
 # We start the subsystem BEFORE backups to ensure cloud connectors are ready.
 # Source [1] indicates the subsystem handles file copy operations.
 
-ssh -i "$VSI_KEY_FILE" \
+ssh -q -i "$VSI_KEY_FILE" \
   -o StrictHostKeyChecking=no \
   -o UserKnownHostsFile=/dev/null \
   ${SSH_USER}@${VSI_IP} \
-  "ssh -i /home/${SSH_USER}/.ssh/id_ed25519_vsi \
+  "ssh -q -i /home/${SSH_USER}/.ssh/id_ed25519_vsi \
        -o StrictHostKeyChecking=no \
        -o UserKnownHostsFile=/dev/null \
        ${SSH_USER}@${IBMI_CLONE_IP} \
@@ -191,13 +191,13 @@ RETVAL=0
 
 # Run SSH. If it fails (non-zero), '||' catches it and assigns the code to RETVAL.
 # This prevents 'set -e' from killing the script.
-ssh -i "$VSI_KEY_FILE" \
+ssh -q -i "$VSI_KEY_FILE" \
   -o StrictHostKeyChecking=no \
   -o UserKnownHostsFile=/dev/null \
   -o ServerAliveInterval=60 \
   -o ServerAliveCountMax=120 \
   ${SSH_USER}@${VSI_IP} \
-  "ssh -i /home/${SSH_USER}/.ssh/id_ed25519_vsi \
+  "ssh -q -i /home/${SSH_USER}/.ssh/id_ed25519_vsi \
        -o StrictHostKeyChecking=no \
        -o UserKnownHostsFile=/dev/null \
        -o ServerAliveInterval=60 \
@@ -227,13 +227,13 @@ echo ""
 RETVAL=0
 
 # Run SSH. Use '|| RETVAL=$?' to catch the non-zero exit code without triggering 'set -e'
-ssh -i "$VSI_KEY_FILE" \
+ssh -q -i "$VSI_KEY_FILE" \
   -o StrictHostKeyChecking=no \
   -o UserKnownHostsFile=/dev/null \
   -o ServerAliveInterval=60 \
   -o ServerAliveCountMax=120 \
   ${SSH_USER}@${VSI_IP} \
-  "ssh -i /home/${SSH_USER}/.ssh/id_ed25519_vsi \
+  "ssh -q -i /home/${SSH_USER}/.ssh/id_ed25519_vsi \
        -o StrictHostKeyChecking=no \
        -o UserKnownHostsFile=/dev/null \
        -o ServerAliveInterval=60 \
@@ -261,13 +261,13 @@ echo "→ [STEP 6] Running BRMS Maintenance..."
 RETVAL=0
 
 # Run Maintenance. Use '|| RETVAL=$?' to catch non-zero exit codes.
-ssh -i "$VSI_KEY_FILE" \
+ssh -q -i "$VSI_KEY_FILE" \
   -o StrictHostKeyChecking=no \
   -o UserKnownHostsFile=/dev/null \
   -o ServerAliveInterval=60 \
   -o ServerAliveCountMax=120 \
   ${SSH_USER}@${VSI_IP} \
-  "ssh -i /home/${SSH_USER}/.ssh/id_ed25519_vsi \
+  "ssh -q -i /home/${SSH_USER}/.ssh/id_ed25519_vsi \
        -o StrictHostKeyChecking=no \
        -o UserKnownHostsFile=/dev/null \
        -o ServerAliveInterval=60 \
@@ -433,11 +433,11 @@ echo ""
 # ------------------------------------------------------------------------------
 echo "→ [STEP 9] Creating library ${SAVF_LIB} and save file on source LPAR..."
 
-ssh -i "$VSI_KEY_FILE" \
+ssh -q -i "$VSI_KEY_FILE" \
   -o StrictHostKeyChecking=no \
   -o UserKnownHostsFile=/dev/null \
   ${SSH_USER}@${VSI_IP} \
-  "ssh -i /home/${SSH_USER}/.ssh/id_ed25519_vsi \
+  "ssh -q -i /home/${SSH_USER}/.ssh/id_ed25519_vsi \
        -o StrictHostKeyChecking=no \
        -o UserKnownHostsFile=/dev/null \
        ${SSH_USER}@${IBMI_SOURCE_IP} \
@@ -445,11 +445,11 @@ ssh -i "$VSI_KEY_FILE" \
     echo "⚠ WARNING: Library ${SAVF_LIB} may already exist"
 }
 
-ssh -i "$VSI_KEY_FILE" \
+ssh -q -i "$VSI_KEY_FILE" \
   -o StrictHostKeyChecking=no \
   -o UserKnownHostsFile=/dev/null \
   ${SSH_USER}@${VSI_IP} \
-  "ssh -i /home/${SSH_USER}/.ssh/id_ed25519_vsi \
+  "ssh -q -i /home/${SSH_USER}/.ssh/id_ed25519_vsi \
        -o StrictHostKeyChecking=no \
        -o UserKnownHostsFile=/dev/null \
        ${SSH_USER}@${IBMI_SOURCE_IP} \
@@ -469,11 +469,11 @@ echo "→ [STEP 10] Downloading history file from COS to source LPAR..."
 # with the IBM i shell (bsh). The file is downloaded to /tmp first 
 # because AWS CLI cannot write to *SAVF directly
 
-ssh -i "$VSI_KEY_FILE" \
+ssh -q -i "$VSI_KEY_FILE" \
   -o StrictHostKeyChecking=no \
   -o UserKnownHostsFile=/dev/null \
   ${SSH_USER}@${VSI_IP} \
-  "ssh -i /home/${SSH_USER}/.ssh/id_ed25519_vsi \
+  "ssh -q -i /home/${SSH_USER}/.ssh/id_ed25519_vsi \
        -o StrictHostKeyChecking=no \
        -o UserKnownHostsFile=/dev/null \
        ${SSH_USER}@${IBMI_SOURCE_IP} \
@@ -493,11 +493,11 @@ echo "→ [STEP 11] Copying stream file to QSYS save file..."
 # We use CPYFRMSTMF with CVTDTA(*NONE) to ensure the binary Save File data
 # is not corrupted by ASCII/EBCDIC conversion during the move to QSYS [1].
 
-ssh -i "$VSI_KEY_FILE" \
+ssh -q -i "$VSI_KEY_FILE" \
   -o StrictHostKeyChecking=no \
   -o UserKnownHostsFile=/dev/null \
   ${SSH_USER}@${VSI_IP} \
-  "ssh -i /home/${SSH_USER}/.ssh/id_ed25519_vsi \
+  "ssh -q -i /home/${SSH_USER}/.ssh/id_ed25519_vsi \
        -o StrictHostKeyChecking=no \
        -o UserKnownHostsFile=/dev/null \
        ${SSH_USER}@${IBMI_SOURCE_IP} \
@@ -516,13 +516,13 @@ echo "→ [STEP 12] Restoring QUSRBRM to temporary library TMPHSTLIB..."
 # We restore to TMPHSTLIB because we cannot overwrite the active QUSRBRM.
 # The merge command in the next step requires the data to be in a separate library [3].
 
-ssh -i "$VSI_KEY_FILE" \
+ssh -q -i "$VSI_KEY_FILE" \
   -o StrictHostKeyChecking=no \
   -o UserKnownHostsFile=/dev/null \
   -o ServerAliveInterval=60 \
   -o ServerAliveCountMax=60 \
   ${SSH_USER}@${VSI_IP} \
-  "ssh -i /home/${SSH_USER}/.ssh/id_ed25519_vsi \
+  "ssh -q -i /home/${SSH_USER}/.ssh/id_ed25519_vsi \
        -o StrictHostKeyChecking=no \
        -o UserKnownHostsFile=/dev/null \
        -o ServerAliveInterval=60 \
@@ -543,11 +543,11 @@ echo "→ [STEP 13] Merging history into live BRMS database..."
 # INZBRM *MERGE consolidates the backup history from the clone into the source.
 # This ensures the source system "knows" about the backups performed in the cloud [2].
 
-ssh -i "$VSI_KEY_FILE" \
+ssh -q -i "$VSI_KEY_FILE" \
   -o StrictHostKeyChecking=no \
   -o UserKnownHostsFile=/dev/null \
   ${SSH_USER}@${VSI_IP} \
-  "ssh -i /home/${SSH_USER}/.ssh/id_ed25519_vsi \
+  "ssh -q -i /home/${SSH_USER}/.ssh/id_ed25519_vsi \
        -o StrictHostKeyChecking=no \
        -o UserKnownHostsFile=/dev/null \
        ${SSH_USER}@${IBMI_SOURCE_IP} \
@@ -567,11 +567,11 @@ echo "→ [STEP 14] Finalizing BRMS FlashCopy state..."
 # It automatically starts the Q1ABRMNET subsystem and resumes BRMS network 
 # synchronization, allowing the system to communicate with other nodes [Source 597].
 
-ssh -i "$VSI_KEY_FILE" \
+ssh -q -i "$VSI_KEY_FILE" \
   -o StrictHostKeyChecking=no \
   -o UserKnownHostsFile=/dev/null \
   ${SSH_USER}@${VSI_IP} \
-  "ssh -i /home/${SSH_USER}/.ssh/id_ed25519_vsi \
+  "ssh -q -i /home/${SSH_USER}/.ssh/id_ed25519_vsi \
        -o StrictHostKeyChecking=no \
        -o UserKnownHostsFile=/dev/null \
        ${SSH_USER}@${IBMI_SOURCE_IP} \
@@ -590,11 +590,11 @@ echo "→ [STEP 15] Deleting temporary library TMPHSTLIB..."
 # The history data has been merged into the production QUSRBRM library.
 # We can now safely remove the temporary restore library [Source 723].
 
-ssh -i "$VSI_KEY_FILE" \
+ssh -q -i "$VSI_KEY_FILE" \
   -o StrictHostKeyChecking=no \
   -o UserKnownHostsFile=/dev/null \
   ${SSH_USER}@${VSI_IP} \
-  "ssh -i /home/${SSH_USER}/.ssh/id_ed25519_vsi \
+  "ssh -q -i /home/${SSH_USER}/.ssh/id_ed25519_vsi \
        -o StrictHostKeyChecking=no \
        -o UserKnownHostsFile=/dev/null \
        ${SSH_USER}@${IBMI_SOURCE_IP} \
@@ -610,11 +610,11 @@ echo ""
 # ------------------------------------------------------------------------------
 echo "→ [STEP 16] Deleting save file..."
 
-ssh -i "$VSI_KEY_FILE" \
+ssh -q -i "$VSI_KEY_FILE" \
   -o StrictHostKeyChecking=no \
   -o UserKnownHostsFile=/dev/null \
   ${SSH_USER}@${VSI_IP} \
-  "ssh -i /home/${SSH_USER}/.ssh/id_ed25519_vsi \
+  "ssh -q -i /home/${SSH_USER}/.ssh/id_ed25519_vsi \
        -o StrictHostKeyChecking=no \
        -o UserKnownHostsFile=/dev/null \
        ${SSH_USER}@${IBMI_SOURCE_IP} \
@@ -630,17 +630,21 @@ echo ""
 # ------------------------------------------------------------------------------
 echo "→ [STEP 17] Deleting library ${SAVF_LIB}..."
 
-ssh -i "$VSI_KEY_FILE" \
+#  Cleanup: Delete the temporary library on the Source
+# We use || true to ensure the script doesn't fail if the library is already gone.
+# We added -q to both SSH commands to silence "Permanently added" warnings.
+ssh -q -i "$VSI_KEY_FILE" \
   -o StrictHostKeyChecking=no \
   -o UserKnownHostsFile=/dev/null \
   ${SSH_USER}@${VSI_IP} \
-  "ssh -i /home/${SSH_USER}/.ssh/id_ed25519_vsi \
+  "ssh -q -i /home/${SSH_USER}/.ssh/id_ed25519_vsi \
        -o StrictHostKeyChecking=no \
        -o UserKnownHostsFile=/dev/null \
        ${SSH_USER}@${IBMI_SOURCE_IP} \
-       'system \"DLTLIB LIB(${SAVF_LIB})\"'" || {
-    echo "⚠ WARNING: Failed to delete library"
-}
+       'system \"DLTLIB LIB(${SAVF_LIB})\"'" || true
+
+# --- CRITICAL FIX: NO 'exit 0' HERE! ---
+# The script must fall through to the lines below.
 
 echo "✓ Library ${SAVF_LIB} deleted"
 echo ""
@@ -649,6 +653,8 @@ echo "------------------------------------------------------------------------"
 echo " Source LPAR Operations Complete"
 echo "------------------------------------------------------------------------"
 echo ""
+
+sleep 15
 
 # ------------------------------------------------------------------------------
 # JOB SUMMARY
@@ -691,6 +697,8 @@ echo "  ✓ All BRMS FlashCopy operations completed successfully"
 echo "  ✓ Backup history synchronized between LPARs"
 echo "  ✓ Production system ready for normal operations"
 echo "========================================================================"
+
+sleep 5
 
 # Explicitly exit with 0 to tell Code Engine the job Succeeded
 exit 0
