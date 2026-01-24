@@ -301,48 +301,61 @@ echo "  Starting polling loop. Will check every 5 minutes for up to 1 hour."
 # Configuration
 MAX_RETRIES=15       # 15 checks * 5 minutes = 75 minutes max
 SLEEP_SECONDS=300    # 5 minutes in seconds
+EXPECTED_VOLUMES=2   # <--- CHANGE THIS: The minimum number of files you expect (e.g., SYS + IPL = 2)
 FOUND_FILES=""
 
 # Start the loop
 for ((i=1; i<=MAX_RETRIES; i++)); do
-    echo "  [Attempt $i/$MAX_RETRIES] Checking for backup files..."
+    echo "  [Attempt $i/$MAX_RETRIES] Checking for at least $EXPECTED_VOLUMES backup files..."
 
     # 1. Define the remote command
-    #    FIX: Added ':/QOpenSys/usr/bin' to the PATH so 'awk' can be found.
-    #    - aws is in /QOpenSys/pkgs/bin
-    #    - awk is in /QOpenSys/usr/bin
+    #    We rely on 'wc -l' to count the lines returned by the grep command
     CHECK_CMD="PATH=/QOpenSys/pkgs/bin:/QOpenSys/usr/bin:\$PATH; export PATH; \
                aws --endpoint-url=${COS_ENDPOINT} s3 ls s3://${COS_BUCKET}/${BRMS_DIR}/ | \
                grep \`date +%Y-%m-%d\` | \
                awk '{print \$4}'"
 
     # 2. Execute via SSH and capture the output (filenames)
+    #    We purposely capture stderr to /dev/null to keep the variable clean for counting
     FOUND_FILES=$(ssh -i "$VSI_KEY_FILE" $SSH_OPTS ${SSH_USER}@${VSI_IP} \
        "ssh -i /home/${SSH_USER}/.ssh/id_ed25519_vsi $SSH_OPTS ${SSH_USER}@${IBMI_CLONE_IP} \
        \"$CHECK_CMD\"") || true
 
-    # 3. Check if we found anything
-    if [ -n "$FOUND_FILES" ]; then
-        echo "  ✓ Backup files detected!"
-        break
+    # 3. Count the number of files found
+    #    If FOUND_FILES is empty, wc -l might return 0 or 1 empty line depending on system, 
+    #    so we handle the empty case explicitly.
+    if [ -z "$FOUND_FILES" ]; then
+        FILE_COUNT=0
+    else
+        FILE_COUNT=$(echo "$FOUND_FILES" | wc -l)
     fi
 
-    # 4. If not found, check if this was the last attempt
+    # 4. Check if we have met the threshold
+    if [ "$FILE_COUNT" -ge "$EXPECTED_VOLUMES" ]; then
+        echo "  ✓ Found $FILE_COUNT files (Threshold: $EXPECTED_VOLUMES). Uploads appear complete."
+        break
+    else
+        echo "  ...Found $FILE_COUNT out of $EXPECTED_VOLUMES expected files. Waiting 5 minutes..."
+    fi
+
+    # 5. Wait if not last attempt
     if [ $i -lt $MAX_RETRIES ]; then
-        echo "  ...No files found yet. Waiting 5 minutes..."
         sleep $SLEEP_SECONDS
     fi
 done
 
-# 5. Final Validation
-if [ -n "$FOUND_FILES" ]; then
-    echo "✓ SUCCESS: The following BRMS backup volumes were found in the cloud:"
+# 6. Final Validation
+#    We check the count one last time to decide success or failure
+if [ "$FILE_COUNT" -ge "$EXPECTED_VOLUMES" ]; then
+    echo "✓ SUCCESS: All expected BRMS backup volumes were found in the cloud:"
     echo "---------------------------------------------------"
     echo "$FOUND_FILES"
     echo "---------------------------------------------------"
 else
-    echo "✗ FAILURE: Timed out after 1 hour. No backup volumes found for today."
-    echo "  Please check BRMS logs on the partition or the COS bucket manually."
+    echo "✗ FAILURE: Timed out after 1 hour."
+    echo "  Expected $EXPECTED_VOLUMES files, but only found $FILE_COUNT."
+    echo "  Found so far:"
+    echo "$FOUND_FILES"
     exit 1
 fi
 
