@@ -60,7 +60,7 @@ readonly SAVF_PATH_IFS="/QSYS.LIB/CLDSTGTMP.LIB/CLNHIST.FILE"
 
 # Polling Configuration
 readonly POLL_INTERVAL=300                # 5 minutes
-readonly MAX_POLL_ATTEMPTS=15             # 15 attempts max
+readonly MAX_POLL_ATTEMPTS=15             # 24 attempts max
 
 echo "Configuration loaded successfully."
 echo "  Clone LPAR:  ${IBMI_CLONE_IP}"
