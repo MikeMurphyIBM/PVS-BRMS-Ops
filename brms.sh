@@ -379,8 +379,8 @@ echo "→ [STEP 8] Finalizing BRMS FlashCopy state and saving QUSRBRM history...
 # 8a. Update BRMS State to *ENDBKU
 # This tells BRMS the backup is finished so the history is marked complete.
 echo "  [Step 8] Setting BRMS state to *ENDBKU..."
-ssh -i "$VSI_KEY_FILE" $SSH_OPTS ${SSH_USER}@${VSI_IP} \
-   "ssh -i /home/${SSH_USER}/.ssh/id_ed25519_vsi $SSH_OPTS ${SSH_USER}@${IBMI_CLONE_IP} \
+ssh -q -i "$VSI_KEY_FILE" $SSH_OPTS ${SSH_USER}@${VSI_IP} \
+   "ssh -q -i /home/${SSH_USER}/.ssh/id_ed25519_vsi $SSH_OPTS ${SSH_USER}@${IBMI_CLONE_IP} \
    'system \"INZBRM OPTION(*FLASHCOPY) STATE(*ENDBKU)\"'" || {
    echo "✗ FAILURE: Could not set BRMS state to *ENDBKU."
    exit 1
@@ -389,8 +389,8 @@ ssh -i "$VSI_KEY_FILE" $SSH_OPTS ${SSH_USER}@${VSI_IP} \
 # 8b. Prepare Scratch Library (CLDSTGTMP)
 # We use '|| true' on DLTLIB so the script doesn't fail if the library doesn't exist yet.
 echo "  [8b] preparing temporary library CLDSTGTMP..."
-ssh -i "$VSI_KEY_FILE" $SSH_OPTS ${SSH_USER}@${VSI_IP} \
-   "ssh -i /home/${SSH_USER}/.ssh/id_ed25519_vsi $SSH_OPTS ${SSH_USER}@${IBMI_CLONE_IP} \
+ssh -q -i "$VSI_KEY_FILE" $SSH_OPTS ${SSH_USER}@${VSI_IP} \
+   "ssh -q -i /home/${SSH_USER}/.ssh/id_ed25519_vsi $SSH_OPTS ${SSH_USER}@${IBMI_CLONE_IP} \
    'system \"DLTLIB LIB(CLDSTGTMP)\" > /dev/null 2>&1 || true; \
     system \"CRTLIB LIB(CLDSTGTMP)\"; \
     system \"CRTSAVF FILE(CLDSTGTMP/CLNHIST)\"'" || {
@@ -401,8 +401,8 @@ ssh -i "$VSI_KEY_FILE" $SSH_OPTS ${SSH_USER}@${VSI_IP} \
 # 8c. Save QUSRBRM to the Save File
 # We omit journals to save space/time as they aren't strictly needed for history merging.
 echo "  [8c] Saving QUSRBRM to save file..."
-ssh -i "$VSI_KEY_FILE" $SSH_OPTS ${SSH_USER}@${VSI_IP} \
-   "ssh -i /home/${SSH_USER}/.ssh/id_ed25519_vsi $SSH_OPTS ${SSH_USER}@${IBMI_CLONE_IP} \
+ssh -q -i "$VSI_KEY_FILE" $SSH_OPTS ${SSH_USER}@${VSI_IP} \
+   "ssh -q -i /home/${SSH_USER}/.ssh/id_ed25519_vsi $SSH_OPTS ${SSH_USER}@${IBMI_CLONE_IP} \
    'system \"SAVLIB LIB(QUSRBRM) DEV(*SAVF) SAVF(CLDSTGTMP/CLNHIST) OMITOBJ((*ALL *JRN) (*ALL *JRNRCV))\"'" || {
    echo "✗ FAILURE: Could not save QUSRBRM library."
    exit 1
@@ -415,8 +415,8 @@ UPLOAD_CMD="PATH=/QOpenSys/pkgs/bin:\$PATH; export PATH; \
             cat /qsys.lib/cldstgtmp.lib/clnhist.file | \
             aws --endpoint-url=${COS_ENDPOINT} s3 cp - s3://${COS_BUCKET}/clnhist.file"
 
-if ssh -i "$VSI_KEY_FILE" $SSH_OPTS ${SSH_USER}@${VSI_IP} \
-   "ssh -i /home/${SSH_USER}/.ssh/id_ed25519_vsi $SSH_OPTS ${SSH_USER}@${IBMI_CLONE_IP} \
+if ssh -q -i "$VSI_KEY_FILE" $SSH_OPTS ${SSH_USER}@${VSI_IP} \
+   "ssh -q -i /home/${SSH_USER}/.ssh/id_ed25519_vsi $SSH_OPTS ${SSH_USER}@${IBMI_CLONE_IP} \
    \"$UPLOAD_CMD\""; then
     echo "✓ SUCCESS: QUSRBRM history uploaded successfully."
 else
