@@ -124,6 +124,179 @@ echo ""
 
 echo ""
 
+echo ""
+echo "-----------------------------------------------------------------------------"
+echo " STEP 7: Check COS for successful uploads of latest BRMS backup files"
+echo "------------------------------------------------------------------------------"
+echo ""
+
+# 1. Define the BRMS directory structure based on your system name
+# BRMS stores files in a folder named QBRMS_{SystemName} 
+# Assuming your system name is MURPHYXP based on your query.
+BRMS_DIR="QBRMS_MURPHYXP"
+
+# 2. Get today's date in the format AWS CLI uses (YYYY-MM-DD)
+TODAY=$(date +%Y-%m-%d)
+
+
+# ------------------------------------------------------------------------------
+# STEP 7: Verify Cloud Upload (Polling Loop)
+# ------------------------------------------------------------------------------
+echo "→ [STEP 7] Verifying backups in s3://${COS_BUCKET}/${BRMS_DIR}/..."
+echo "  Starting polling loop. Will check every 5 minutes for up to 1 hour."
+
+# Configuration
+MAX_RETRIES=24       # 24 checks * 5 minutes = 120 minutes max
+SLEEP_SECONDS=300    # 5 minutes in seconds
+EXPECTED_VOLUMES=2   # <--- CHANGE THIS: The minimum number of files you expect (e.g., SYS + IPL = 2)
+FOUND_FILES=""
+
+# Start the loop
+for ((i=1; i<=MAX_RETRIES; i++)); do
+    echo "  [Attempt $i/$MAX_RETRIES] Checking for at least $EXPECTED_VOLUMES backup files..."
+
+    # 1. Define the remote command
+    #    We rely on 'wc -l' to count the lines returned by the grep command
+    CHECK_CMD="PATH=/QOpenSys/pkgs/bin:/QOpenSys/usr/bin:\$PATH; export PATH; \
+               aws --endpoint-url=${COS_ENDPOINT} s3 ls s3://${COS_BUCKET}/${BRMS_DIR}/ | \
+               grep \`date +%Y-%m-%d\` | \
+               awk '{print \$4}'"
+
+    # 2. Execute via SSH and capture the output (filenames)
+    #    We purposely capture stderr to /dev/null to keep the variable clean for counting
+    FOUND_FILES=$(ssh -i "$VSI_KEY_FILE" $SSH_OPTS ${SSH_USER}@${VSI_IP} \
+       "ssh -i /home/${SSH_USER}/.ssh/id_ed25519_vsi $SSH_OPTS ${SSH_USER}@${IBMI_CLONE_IP} \
+       \"$CHECK_CMD\"") || true
+
+    # 3. Count the number of files found
+    #    If FOUND_FILES is empty, wc -l might return 0 or 1 empty line depending on system, 
+    #    so we handle the empty case explicitly.
+    if [ -z "$FOUND_FILES" ]; then
+        FILE_COUNT=0
+    else
+        FILE_COUNT=$(echo "$FOUND_FILES" | wc -l)
+    fi
+
+    # 4. Check if we have met the threshold
+    if [ "$FILE_COUNT" -ge "$EXPECTED_VOLUMES" ]; then
+        echo "  ✓ Found $FILE_COUNT files (Threshold: $EXPECTED_VOLUMES). Uploads appear complete."
+        break
+    else
+        echo "  ...Found $FILE_COUNT out of $EXPECTED_VOLUMES expected files. Waiting 5 minutes..."
+    fi
+
+    # 5. Wait if not last attempt
+    if [ $i -lt $MAX_RETRIES ]; then
+        sleep $SLEEP_SECONDS
+    fi
+done
+
+# 6. Final Validation
+#    We check the count one last time to decide success or failure
+if [ "$FILE_COUNT" -ge "$EXPECTED_VOLUMES" ]; then
+    echo "✓ SUCCESS: All expected BRMS backup volumes were found in the cloud:"
+    echo "---------------------------------------------------"
+    echo "$FOUND_FILES"
+    echo "---------------------------------------------------"
+else
+    echo "✗ FAILURE: Timed out after 1 hour."
+    echo "  Expected $EXPECTED_VOLUMES files, but only found $FILE_COUNT."
+    echo "  Found so far:"
+    echo "$FOUND_FILES"
+    exit 1
+fi
+
+echo ""
+echo "-----------------------------------------------------------------------------"
+echo " STEP 7b: Run BRMS Maintenance to inform directory of successful transfer"
+echo "------------------------------------------------------------------------------"
+echo ""
+
+echo "→ [STEP 7b] Running BRMS Maintenance..."
+
+# Initialize variable
+RETVAL=0
+
+# Run Maintenance. Use '|| RETVAL=$?' to catch non-zero exit codes.
+ssh -q -i "$VSI_KEY_FILE" \
+  -o StrictHostKeyChecking=no \
+  -o UserKnownHostsFile=/dev/null \
+  -o ServerAliveInterval=60 \
+  -o ServerAliveCountMax=120 \
+  ${SSH_USER}@${VSI_IP} \
+  "ssh -q -i /home/${SSH_USER}/.ssh/id_ed25519_vsi \
+       -o StrictHostKeyChecking=no \
+       -o UserKnownHostsFile=/dev/null \
+       -o ServerAliveInterval=60 \
+       -o ServerAliveCountMax=120 \
+       ${SSH_USER}@${IBMI_CLONE_IP} \
+       'system \"STRMNTBRM MOVMED(*YES) RUNCLNUP(*YES) PRTRCYRPT(*ALL)\"'" || RETVAL=$?
+
+# Check the code. 
+# Note: Code 0 is success. 
+if [ "$RETVAL" -ne 0 ]; then
+    echo "⚠️ [STEP 6] Maintenance completed with exit code $RETVAL."
+    echo "  (This is common for STRMNTBRM if there were minor warnings or locked files)."
+    echo "  Proceeding to finalization..."
+else
+    echo "✓ [STEP 6] Maintenance completed successfully."
+fi
+
+echo ""
+echo "-----------------------------------------------------------------------------"
+echo " STEP 8: BRMS Flashcopy status change and QUSRBRM file history saved"
+echo "------------------------------------------------------------------------------"
+echo ""
+echo "→ [STEP 8] Finalizing BRMS FlashCopy state and saving QUSRBRM history..."
+
+# 8a. Update BRMS State to *ENDBKU
+# This tells BRMS the backup is finished so the history is marked complete.
+echo "  [Step 8] Setting BRMS state to *ENDBKU..."
+ssh -q -i "$VSI_KEY_FILE" $SSH_OPTS ${SSH_USER}@${VSI_IP} \
+   "ssh -q -i /home/${SSH_USER}/.ssh/id_ed25519_vsi $SSH_OPTS ${SSH_USER}@${IBMI_CLONE_IP} \
+   'system \"INZBRM OPTION(*FLASHCOPY) STATE(*ENDBKU)\"'" || {
+   echo "✗ FAILURE: Could not set BRMS state to *ENDBKU."
+   exit 1
+}
+
+# 8b. Prepare Scratch Library (CLDSTGTMP)
+# We use '|| true' on DLTLIB so the script doesn't fail if the library doesn't exist yet.
+echo "  [8b] preparing temporary library CLDSTGTMP..."
+ssh -q -i "$VSI_KEY_FILE" $SSH_OPTS ${SSH_USER}@${VSI_IP} \
+   "ssh -q -i /home/${SSH_USER}/.ssh/id_ed25519_vsi $SSH_OPTS ${SSH_USER}@${IBMI_CLONE_IP} \
+   'system \"DLTLIB LIB(CLDSTGTMP)\" > /dev/null 2>&1 || true; \
+    system \"CRTLIB LIB(CLDSTGTMP)\"; \
+    system \"CRTSAVF FILE(CLDSTGTMP/CLNHIST)\"'" || {
+   echo "✗ FAILURE: Could not create temporary library or save file."
+   exit 1
+}
+
+# 8c. Save QUSRBRM to the Save File
+# We omit journals to save space/time as they aren't strictly needed for history merging.
+echo "  [8c] Saving QUSRBRM to save file..."
+ssh -q -i "$VSI_KEY_FILE" $SSH_OPTS ${SSH_USER}@${VSI_IP} \
+   "ssh -q -i /home/${SSH_USER}/.ssh/id_ed25519_vsi $SSH_OPTS ${SSH_USER}@${IBMI_CLONE_IP} \
+   'system \"SAVLIB LIB(QUSRBRM) DEV(*SAVF) SAVF(CLDSTGTMP/CLNHIST) OMITOBJ((*ALL *JRN) (*ALL *JRNRCV))\"'" || {
+   echo "✗ FAILURE: Could not save QUSRBRM library."
+   exit 1
+}
+
+# 8d. Upload the Save File to Cloud Object Storage
+# We use the specific PATH export required for the PASE shell.
+echo "  [8d] Uploading QUSRBRM save file to COS..."
+UPLOAD_CMD="PATH=/QOpenSys/pkgs/bin:\$PATH; export PATH; \
+            cat /qsys.lib/cldstgtmp.lib/clnhist.file | \
+            aws --endpoint-url=${COS_ENDPOINT} s3 cp - s3://${COS_BUCKET}/clnhist.file"
+
+if ssh -q -i "$VSI_KEY_FILE" $SSH_OPTS ${SSH_USER}@${VSI_IP} \
+   "ssh -q -i /home/${SSH_USER}/.ssh/id_ed25519_vsi $SSH_OPTS ${SSH_USER}@${IBMI_CLONE_IP} \
+   \"$UPLOAD_CMD\""; then
+    echo "✓ SUCCESS: QUSRBRM history uploaded successfully."
+else
+    echo "✗ FAILURE: Could not upload QUSRBRM to Cloud Object Storage."
+    exit 1
+fi
+echo ""
 
 ################################################################################
 # SOURCE LPAR OPERATIONS
@@ -368,15 +541,18 @@ echo ""
 echo "✓ Save file deleted"
 echo ""
 
+
+# STEP 17: Delete Library (Corrected to prevent script exit on warnings)
+# -----------------------------------------------------------------------------
 echo "-----------------------------------------------------------------------------"
 echo " STEP 17: Delete Library"
 echo "-----------------------------------------------------------------------------"
 echo ""
 echo "→ [STEP 17] Deleting library ${SAVF_LIB}..."
 
-#  Cleanup: Delete the temporary library on the Source
-# We use || true to ensure the script doesn't fail if the library is already gone.
-# We added -q to both SSH commands to silence "Permanently added" warnings.
+# We append '|| true' to ensure that even if DLTLIB returns a warning/escape message,
+# the script considers this step successful and proceeds to the summary.
+# Source: BRMS maintenance/cleanup often generates informational messages treated as non-zero codes [1].
 ssh -q -i "$VSI_KEY_FILE" \
   -o StrictHostKeyChecking=no \
   -o UserKnownHostsFile=/dev/null \
@@ -387,22 +563,21 @@ ssh -q -i "$VSI_KEY_FILE" \
        ${SSH_USER}@${IBMI_SOURCE_IP} \
        'system \"DLTLIB LIB(${SAVF_LIB})\"'" || true
 
-# --- CRITICAL FIX: NO 'exit 0' HERE! ---
-# The script must fall through to the lines below.
-
-echo "✓ Library ${SAVF_LIB} deleted"
+echo "✓ Library ${SAVF_LIB} deletion attempted (Cleaning up)."
 echo ""
-
 echo "-----------------------------------------------------------------------"
 echo " Source LPAR BRMS Operations Complete"
 echo "-----------------------------------------------------------------------"
 echo ""
 
-sleep 15
+sleep 5
 
 # ------------------------------------------------------------------------------
 # JOB SUMMARY
 # ------------------------------------------------------------------------------
+# Default FOUND_FILES to empty string if unset to prevent crash on 'set -u'
+FOUND_FILES=${FOUND_FILES:-""}
+
 echo "========================================================================"
 echo "              BRMS FLASHCOPY BACKUP JOB COMPLETION REPORT"
 echo "========================================================================"
@@ -421,6 +596,7 @@ echo "   ✓ Target Bucket: s3://${COS_BUCKET}"
 echo ""
 echo "   [Uploaded Backup Volumes]"
 echo "   ---------------------------------------------------"
+# Check if FOUND_FILES contains data
 if [ -n "$FOUND_FILES" ]; then
     echo "$FOUND_FILES"
 else
@@ -430,7 +606,7 @@ echo "   ---------------------------------------------------"
 echo ""
 echo "4. HISTORY SYNCHRONIZATION:"
 echo "   ✓ QUSRBRM downloaded from COS to Source."
-echo "   ✓ Restored to temporary library CLDSTGTMP."
+echo "   ✓ Restored to temporary library ${SAVF_LIB}."
 echo "   ✓ History merged into active BRMS database."
 echo ""
 echo "5. CLEANUP:"
@@ -442,7 +618,5 @@ echo "  ✓ Backup history synchronized between LPARs"
 echo "  ✓ Production system ready for normal operations"
 echo "========================================================================"
 
-sleep 5
-
-# Explicitly exit with 0 to tell Code Engine the job Succeeded
+# Explicitly exit with 0 to signal success to the job runner
 exit 0
