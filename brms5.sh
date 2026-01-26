@@ -575,7 +575,7 @@ sleep 5
 # ------------------------------------------------------------------------------
 # JOB SUMMARY
 # ------------------------------------------------------------------------------
-# Default FOUND_FILES to empty string if unset to prevent crash on 'set -u'
+# Ensure variable exists to prevent 'unbound variable' errors
 FOUND_FILES=${FOUND_FILES:-""}
 
 echo "========================================================================"
@@ -596,12 +596,8 @@ echo "   ✓ Target Bucket: s3://${COS_BUCKET}"
 echo ""
 echo "   [Uploaded Backup Volumes]"
 echo "   ---------------------------------------------------"
-# Check if FOUND_FILES contains data
-if [ -n "$FOUND_FILES" ]; then
-    echo "$FOUND_FILES"
-else
-    echo "   (No volume names captured in polling variable)"
-fi
+# Simplified logic: Prints the files if they exist, or the default message if empty.
+echo "${FOUND_FILES:-   (No volume names captured in polling variable)}"
 echo "   ---------------------------------------------------"
 echo ""
 echo "4. HISTORY SYNCHRONIZATION:"
@@ -618,5 +614,9 @@ echo "  ✓ Backup history synchronized between LPARs"
 echo "  ✓ Production system ready for normal operations"
 echo "========================================================================"
 
-# Explicitly exit with 0 to signal success to the job runner
+# CRITICAL FIX: Wait for logs to flush to the console before exiting
+echo "Finalizing job logs..."
+sleep 60
+
+# Explicitly exit with 0 to tell Code Engine the job Succeeded
 exit 0
