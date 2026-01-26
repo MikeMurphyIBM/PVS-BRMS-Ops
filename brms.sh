@@ -289,6 +289,7 @@ else
 fi
 
 echo ""
+echo ""
 echo "-----------------------------------------------------------------------------"
 echo " STEP 7: Check COS for successful uploads of latest BRMS backup files"
 echo "------------------------------------------------------------------------------"
@@ -475,8 +476,9 @@ echo "--------------------------------------------------------------------------
 echo " STEP 9: Create Library and Save File on Source LPAR"
 echo "-----------------------------------------------------------------------------"
 echo ""
-echo "→ [STEP 9] Creating library ${SAVF_LIB} and save file on source LPAR..."
+echo "→ [STEP 9] Creating library ${SAVF_LIB}..."
 
+# 1. Create the Library (Ignore failure if it already exists)
 ssh -q -i "$VSI_KEY_FILE" \
   -o StrictHostKeyChecking=no \
   -o UserKnownHostsFile=/dev/null \
@@ -486,9 +488,30 @@ ssh -q -i "$VSI_KEY_FILE" \
        -o UserKnownHostsFile=/dev/null \
        ${SSH_USER}@${IBMI_SOURCE_IP} \
        'system \"CRTLIB LIB(${SAVF_LIB})\"'" || {
-    echo "⚠ WARNING: Library ${SAVF_LIB} may already exist"
+    echo "⚠ WARNING: Library ${SAVF_LIB} exists or could not be created. Proceeding..."
 }
 
+echo "→ [STEP 9] Preparing Save File (Delete old version if exists)..."
+
+# 2. Delete the old Save File (Ignore failure if file doesn't exist)
+# We accept failure here (|| true) because it's okay if the file isn't there to delete.
+ssh -q -i "$VSI_KEY_FILE" \
+  -o StrictHostKeyChecking=no \
+  -o UserKnownHostsFile=/dev/null \
+  ${SSH_USER}@${VSI_IP} \
+  "ssh -q -i /home/${SSH_USER}/.ssh/id_ed25519_vsi \
+       -o StrictHostKeyChecking=no \
+       -o UserKnownHostsFile=/dev/null \
+       ${SSH_USER}@${IBMI_SOURCE_IP} \
+       'system \"DLTF FILE(${SAVF_LIB}/${SAVF_NAME})\"'" || true
+
+# 3. Wait briefly to ensure the object lock is released
+echo "→ [STEP 9] Waiting 5 seconds for system cleanup..."
+sleep 5
+
+echo "→ [STEP 9] Creating new Save File..."
+
+# 4. Create the new Save File (This must succeed)
 ssh -q -i "$VSI_KEY_FILE" \
   -o StrictHostKeyChecking=no \
   -o UserKnownHostsFile=/dev/null \
@@ -498,7 +521,7 @@ ssh -q -i "$VSI_KEY_FILE" \
        -o UserKnownHostsFile=/dev/null \
        ${SSH_USER}@${IBMI_SOURCE_IP} \
        'system \"CRTSAVF FILE(${SAVF_LIB}/${SAVF_NAME})\"'" || {
-    echo "✗ ERROR: Failed to create save file on source"
+    echo "✗ ERROR: Failed to create save file ${SAVF_LIB}/${SAVF_NAME} on source"
     exit 1
 }
 
@@ -683,15 +706,18 @@ echo ""
 echo "✓ Save file deleted"
 echo ""
 
+
+# STEP 17: Delete Library (Corrected to prevent script exit on warnings)
+# -----------------------------------------------------------------------------
 echo "-----------------------------------------------------------------------------"
 echo " STEP 17: Delete Library"
 echo "-----------------------------------------------------------------------------"
 echo ""
 echo "→ [STEP 17] Deleting library ${SAVF_LIB}..."
 
-#  Cleanup: Delete the temporary library on the Source
-# We use || true to ensure the script doesn't fail if the library is already gone.
-# We added -q to both SSH commands to silence "Permanently added" warnings.
+# We append '|| true' to ensure that even if DLTLIB returns a warning/escape message,
+# the script considers this step successful and proceeds to the summary.
+# Source: BRMS maintenance/cleanup often generates informational messages treated as non-zero codes [1].
 ssh -q -i "$VSI_KEY_FILE" \
   -o StrictHostKeyChecking=no \
   -o UserKnownHostsFile=/dev/null \
@@ -702,22 +728,21 @@ ssh -q -i "$VSI_KEY_FILE" \
        ${SSH_USER}@${IBMI_SOURCE_IP} \
        'system \"DLTLIB LIB(${SAVF_LIB})\"'" || true
 
-# --- CRITICAL FIX: NO 'exit 0' HERE! ---
-# The script must fall through to the lines below.
-
-echo "✓ Library ${SAVF_LIB} deleted"
+echo "✓ Library ${SAVF_LIB} deletion attempted (Cleaning up)."
 echo ""
-
 echo "-----------------------------------------------------------------------"
 echo " Source LPAR BRMS Operations Complete"
 echo "-----------------------------------------------------------------------"
 echo ""
 
-sleep 15
+sleep 5
 
 # ------------------------------------------------------------------------------
 # JOB SUMMARY
 # ------------------------------------------------------------------------------
+# Ensure variable exists to prevent 'unbound variable' errors
+FOUND_FILES=${FOUND_FILES:-""}
+
 echo "========================================================================"
 echo "              BRMS FLASHCOPY BACKUP JOB COMPLETION REPORT"
 echo "========================================================================"
@@ -736,16 +761,13 @@ echo "   ✓ Target Bucket: s3://${COS_BUCKET}"
 echo ""
 echo "   [Uploaded Backup Volumes]"
 echo "   ---------------------------------------------------"
-if [ -n "$FOUND_FILES" ]; then
-    echo "$FOUND_FILES"
-else
-    echo "   (No volume names captured in polling variable)"
-fi
+# Simplified logic: Prints the files if they exist, or the default message if empty.
+echo "${FOUND_FILES:-   (No volume names captured in polling variable)}"
 echo "   ---------------------------------------------------"
 echo ""
 echo "4. HISTORY SYNCHRONIZATION:"
 echo "   ✓ QUSRBRM downloaded from COS to Source."
-echo "   ✓ Restored to temporary library CLDSTGTMP."
+echo "   ✓ Restored to temporary library ${SAVF_LIB}."
 echo "   ✓ History merged into active BRMS database."
 echo ""
 echo "5. CLEANUP:"
@@ -757,7 +779,9 @@ echo "  ✓ Backup history synchronized between LPARs"
 echo "  ✓ Production system ready for normal operations"
 echo "========================================================================"
 
-sleep 5
+# CRITICAL FIX: Wait for logs to flush to the console before exiting
+echo "Finalizing job logs..."
+sleep 60
 
 # Explicitly exit with 0 to tell Code Engine the job Succeeded
 exit 0
