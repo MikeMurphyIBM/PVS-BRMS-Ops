@@ -193,6 +193,7 @@ echo "--------------------------------------------------------------------------
 echo ""
 echo "→ [STEP 9] Creating library ${SAVF_LIB} and save file on source LPAR..."
 
+# 1. Create the Library (Ignore failure if it already exists)
 ssh -q -i "$VSI_KEY_FILE" \
   -o StrictHostKeyChecking=no \
   -o UserKnownHostsFile=/dev/null \
@@ -202,9 +203,10 @@ ssh -q -i "$VSI_KEY_FILE" \
        -o UserKnownHostsFile=/dev/null \
        ${SSH_USER}@${IBMI_SOURCE_IP} \
        'system \"CRTLIB LIB(${SAVF_LIB})\"'" || {
-    echo "⚠ WARNING: Library ${SAVF_LIB} may already exist"
+    echo "⚠ WARNING: Library ${SAVF_LIB} already exists or could not be created."
 }
 
+# 2. Delete the Save File if it exists, then Create it
 ssh -q -i "$VSI_KEY_FILE" \
   -o StrictHostKeyChecking=no \
   -o UserKnownHostsFile=/dev/null \
@@ -213,7 +215,8 @@ ssh -q -i "$VSI_KEY_FILE" \
        -o StrictHostKeyChecking=no \
        -o UserKnownHostsFile=/dev/null \
        ${SSH_USER}@${IBMI_SOURCE_IP} \
-       'system \"CRTSAVF FILE(${SAVF_LIB}/${SAVF_NAME})\"'" || {
+       'system \"DLTF FILE(${SAVF_LIB}/${SAVF_NAME})\"'; \
+       system \"CRTSAVF FILE(${SAVF_LIB}/${SAVF_NAME})\"" || {
     echo "✗ ERROR: Failed to create save file on source"
     exit 1
 }
