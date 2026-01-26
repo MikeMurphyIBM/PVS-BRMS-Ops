@@ -191,7 +191,7 @@ echo "--------------------------------------------------------------------------
 echo " STEP 9: Create Library and Save File on Source LPAR"
 echo "-----------------------------------------------------------------------------"
 echo ""
-echo "→ [STEP 9] Creating library ${SAVF_LIB} and save file on source LPAR..."
+echo "→ [STEP 9] Creating library ${SAVF_LIB}..."
 
 # 1. Create the Library (Ignore failure if it already exists)
 ssh -q -i "$VSI_KEY_FILE" \
@@ -203,10 +203,13 @@ ssh -q -i "$VSI_KEY_FILE" \
        -o UserKnownHostsFile=/dev/null \
        ${SSH_USER}@${IBMI_SOURCE_IP} \
        'system \"CRTLIB LIB(${SAVF_LIB})\"'" || {
-    echo "⚠ WARNING: Library ${SAVF_LIB} already exists or could not be created."
+    echo "⚠ WARNING: Library ${SAVF_LIB} exists or could not be created. Proceeding..."
 }
 
-# 2. Delete the Save File if it exists, then Create it
+echo "→ [STEP 9] Preparing Save File (Delete old version if exists)..."
+
+# 2. Delete the old Save File (Ignore failure if file doesn't exist)
+# We accept failure here (|| true) because it's okay if the file isn't there to delete.
 ssh -q -i "$VSI_KEY_FILE" \
   -o StrictHostKeyChecking=no \
   -o UserKnownHostsFile=/dev/null \
@@ -215,9 +218,25 @@ ssh -q -i "$VSI_KEY_FILE" \
        -o StrictHostKeyChecking=no \
        -o UserKnownHostsFile=/dev/null \
        ${SSH_USER}@${IBMI_SOURCE_IP} \
-       'system \"DLTF FILE(${SAVF_LIB}/${SAVF_NAME})\"'; \
-       system \"CRTSAVF FILE(${SAVF_LIB}/${SAVF_NAME})\"" || {
-    echo "✗ ERROR: Failed to create save file on source"
+       'system \"DLTF FILE(${SAVF_LIB}/${SAVF_NAME})\"'" || true
+
+# 3. Wait briefly to ensure the object lock is released
+echo "→ [STEP 9] Waiting 5 seconds for system cleanup..."
+sleep 5
+
+echo "→ [STEP 9] Creating new Save File..."
+
+# 4. Create the new Save File (This must succeed)
+ssh -q -i "$VSI_KEY_FILE" \
+  -o StrictHostKeyChecking=no \
+  -o UserKnownHostsFile=/dev/null \
+  ${SSH_USER}@${VSI_IP} \
+  "ssh -q -i /home/${SSH_USER}/.ssh/id_ed25519_vsi \
+       -o StrictHostKeyChecking=no \
+       -o UserKnownHostsFile=/dev/null \
+       ${SSH_USER}@${IBMI_SOURCE_IP} \
+       'system \"CRTSAVF FILE(${SAVF_LIB}/${SAVF_NAME})\"'" || {
+    echo "✗ ERROR: Failed to create save file ${SAVF_LIB}/${SAVF_NAME} on source"
     exit 1
 }
 
