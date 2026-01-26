@@ -252,7 +252,7 @@ else
   echo "✓ [STEP 5] Backup completed successfully."
 fi
 
-
+echo ""
 echo "-----------------------------------------------------------------------------"
 echo " STEP 6: Run BRMS Maintenance to clean up files and move media to COS"
 echo "------------------------------------------------------------------------------"
@@ -288,7 +288,7 @@ else
     echo "✓ [STEP 6] Maintenance completed successfully."
 fi
 
-
+echo ""
 echo "-----------------------------------------------------------------------------"
 echo " STEP 7: Check COS for successful uploads of latest BRMS backup files"
 echo "------------------------------------------------------------------------------"
@@ -370,6 +370,7 @@ else
     exit 1
 fi
 
+echo ""
 echo "-----------------------------------------------------------------------------"
 echo " STEP 7b: Run BRMS Maintenance to inform directory of successful transfer"
 echo "------------------------------------------------------------------------------"
@@ -405,6 +406,7 @@ else
     echo "✓ [STEP 6] Maintenance completed successfully."
 fi
 
+echo ""
 echo "-----------------------------------------------------------------------------"
 echo " STEP 8: BRMS Flashcopy status change and QUSRBRM file history saved"
 echo "------------------------------------------------------------------------------"
@@ -458,6 +460,7 @@ else
     echo "✗ FAILURE: Could not upload QUSRBRM to Cloud Object Storage."
     exit 1
 fi
+echo ""
 
 ################################################################################
 # SOURCE LPAR OPERATIONS
@@ -499,6 +502,7 @@ ssh -q -i "$VSI_KEY_FILE" \
     exit 1
 }
 
+echo ""
 echo "✓ Library and save file created on source LPAR"
 echo ""
 
@@ -525,6 +529,7 @@ ssh -q -i "$VSI_KEY_FILE" \
     exit 1
 }
 
+echo ""
 echo "✓ History file downloaded to /tmp/${COS_FILE}"
 echo ""
 
@@ -577,6 +582,7 @@ ssh -q -i "$VSI_KEY_FILE" \
     exit 1
 }
 
+echo ""
 echo "✓ QUSRBRM restored to TMPHSTLIB"
 echo ""
 
@@ -601,6 +607,7 @@ ssh -q -i "$VSI_KEY_FILE" \
     exit 1
 }
 
+echo ""
 echo "✓ BRMS history merged successfully"
 echo ""
 
@@ -626,6 +633,7 @@ ssh -q -i "$VSI_KEY_FILE" \
     exit 1
 }
 
+echo ""
 echo "✓ BRMS state set to *ENDPRC - normal operations resumed"
 echo ""
 
@@ -649,6 +657,7 @@ ssh -q -i "$VSI_KEY_FILE" \
     echo "⚠ WARNING: Failed to delete TMPHSTLIB"
 }
 
+echo ""
 echo "✓ TMPHSTLIB deleted"
 echo ""
 
@@ -670,6 +679,7 @@ ssh -q -i "$VSI_KEY_FILE" \
     echo "⚠ WARNING: Failed to delete save file"
 }
 
+echo ""
 echo "✓ Save file deleted"
 echo ""
 
