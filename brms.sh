@@ -371,6 +371,41 @@ else
 fi
 
 echo "-----------------------------------------------------------------------------"
+echo " STEP 7b: Run BRMS Maintenance to inform directory of successful transfer"
+echo "------------------------------------------------------------------------------"
+echo ""
+
+echo "→ [STEP 7b] Running BRMS Maintenance..."
+
+# Initialize variable
+RETVAL=0
+
+# Run Maintenance. Use '|| RETVAL=$?' to catch non-zero exit codes.
+ssh -q -i "$VSI_KEY_FILE" \
+  -o StrictHostKeyChecking=no \
+  -o UserKnownHostsFile=/dev/null \
+  -o ServerAliveInterval=60 \
+  -o ServerAliveCountMax=120 \
+  ${SSH_USER}@${VSI_IP} \
+  "ssh -q -i /home/${SSH_USER}/.ssh/id_ed25519_vsi \
+       -o StrictHostKeyChecking=no \
+       -o UserKnownHostsFile=/dev/null \
+       -o ServerAliveInterval=60 \
+       -o ServerAliveCountMax=120 \
+       ${SSH_USER}@${IBMI_CLONE_IP} \
+       'system \"STRMNTBRM MOVMED(*YES) RUNCLNUP(*YES) PRTRCYRPT(*ALL)\"'" || RETVAL=$?
+
+# Check the code. 
+# Note: Code 0 is success. 
+if [ "$RETVAL" -ne 0 ]; then
+    echo "⚠️ [STEP 6] Maintenance completed with exit code $RETVAL."
+    echo "  (This is common for STRMNTBRM if there were minor warnings or locked files)."
+    echo "  Proceeding to finalization..."
+else
+    echo "✓ [STEP 6] Maintenance completed successfully."
+fi
+
+echo "-----------------------------------------------------------------------------"
 echo " STEP 8: BRMS Flashcopy status change and QUSRBRM file history saved"
 echo "------------------------------------------------------------------------------"
 echo ""
