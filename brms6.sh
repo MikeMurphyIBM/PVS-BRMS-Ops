@@ -41,6 +41,10 @@ readonly IBMI_SOURCE_IP="192.168.0.33"    # Source LPAR (production)
 readonly IBMI_CLONE_IP="192.168.10.35"    # Clone LPAR (backup target)
 readonly SSH_USER="murphy"                # Username for all systems
 
+# IBM Cloud Authentication (for optional cleanup job)
+readonly API_KEY="${IBMCLOUD_API_KEY}"
+readonly REGION="us-south"
+
 # BRMS Configuration
 # Note: Ensure these QCLDC* groups exist. If using defaults, change to QCLDB*.
 readonly CONTROL_GROUP_1="QCLDCUSR01"     # First backup control group
@@ -790,6 +794,13 @@ echo ""
 # Check the environment variable set in Code Engine
 if [[ "${RUN_CLEANUP_JOB:-No}" == "Yes" ]]; then
     echo "→ Proceed to Cleanup has been requested - triggering PVS-Clone-Cleanup..."
+
+    echo "→ Authenticating to IBM Cloud (Region: ${REGION})..."
+    ibmcloud login --apikey "$API_KEY" -r "$REGION" > /dev/null 2>&1 || {
+    echo "✗ ERROR: IBM Cloud login failed"
+    exit 1
+    }
+    echo "✓ Authentication successful"
 
     # Ensure we target the correct resource group
     echo "  Targeting resource group: cloud-techsales..."
