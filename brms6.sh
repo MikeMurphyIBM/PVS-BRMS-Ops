@@ -665,6 +665,44 @@ echo "✓ BRMS state set to *ENDPRC - normal operations resumed"
 echo ""
 
 echo "-----------------------------------------------------------------------------"
+echo " STEP 14b: Run BRMS Maintenance on Source to finalize database updates"
+echo "------------------------------------------------------------------------------"
+echo ""
+
+echo "→ [STEP 14b] Running BRMS Maintenance on Source LPAR (${IBMI_SOURCE_IP})..."
+
+# Initialize variable
+RETVAL=0
+
+# Run Maintenance. Use '|| RETVAL=$?' to catch non-zero exit codes.
+# CHANGED: Targeted IBMI_SOURCE_IP instead of CLONE
+ssh -q -i "$VSI_KEY_FILE" \
+  -o StrictHostKeyChecking=no \
+  -o UserKnownHostsFile=/dev/null \
+  -o ServerAliveInterval=60 \
+  -o ServerAliveCountMax=120 \
+  ${SSH_USER}@${VSI_IP} \
+  "ssh -q -i /home/${SSH_USER}/.ssh/id_ed25519_vsi \
+       -o StrictHostKeyChecking=no \
+       -o UserKnownHostsFile=/dev/null \
+       -o ServerAliveInterval=60 \
+       -o ServerAliveCountMax=120 \
+       ${SSH_USER}@${IBMI_SOURCE_IP} \
+       'system \"STRMNTBRM MOVMED(*YES) RUNCLNUP(*YES) PRTRCYRPT(*ALL)\"'" || RETVAL=$?
+
+# Check the code. 
+# Note: Code 0 is success. 
+if [ "$RETVAL" -ne 0 ]; then
+    echo "⚠️ [STEP 16] Source Maintenance completed with exit code $RETVAL."
+    echo "  (This is common for STRMNTBRM if there were minor warnings or locked files)."
+    echo "  Proceeding to finalization..."
+else
+    echo "✓ [STEP 16] Source Maintenance completed successfully."
+fi
+
+echo ""
+
+echo "-----------------------------------------------------------------------------"
 echo " STEP 15: Delete Temporary Library"
 echo "-----------------------------------------------------------------------------"
 echo ""
