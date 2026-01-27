@@ -26,10 +26,10 @@ RUN ibmcloud plugin install code-engine -f
 WORKDIR /workspace
 
 # Copy BRMS script into the container
-COPY brms7.sh /workspace/brms7.sh
+COPY brms6.sh /workspace/brms6.sh
 
 # Make script executable
-RUN chmod +x /workspace/brms7.sh
+RUN chmod +x /workspace/brms6.sh
 
 # Set entrypoint
-ENTRYPOINT ["/workspace/brms7.sh"]
+ENTRYPOINT ["/workspace/brms6.sh"]
