@@ -693,11 +693,11 @@ ssh -q -i "$VSI_KEY_FILE" \
 # Check the code. 
 # Note: Code 0 is success. 
 if [ "$RETVAL" -ne 0 ]; then
-    echo "⚠️ [STEP 16] Source Maintenance completed with exit code $RETVAL."
+    echo "⚠️ [STEP 14b] Source Maintenance completed with exit code $RETVAL."
     echo "  (This is common for STRMNTBRM if there were minor warnings or locked files)."
     echo "  Proceeding to finalization..."
 else
-    echo "✓ [STEP 16] Source Maintenance completed successfully."
+    echo "✓ [STEP 14b] Source Maintenance completed successfully."
 fi
 
 echo ""
