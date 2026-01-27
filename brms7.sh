@@ -75,68 +75,30 @@ echo ""
 ################################################################################
 # OPTIONAL STAGE: TRIGGER CLEANUP JOB
 ################################################################################
-echo "========================================================================"
-echo " OPTIONAL STAGE: CHAIN TO PVS CLONE CLEANUP"
-echo "========================================================================"
+
+echo "-----------------------------------------------------------------------------"
+echo " STEP 3: Start ICC/COS Subsystem"
+echo "-----------------------------------------------------------------------------"
 echo ""
+echo "→ [Step 3] Starting ICC/COS subsystem..."
+# We start the subsystem BEFORE backups to ensure cloud connectors are ready.
+# Source [1] indicates the subsystem handles file copy operations.
 
-# Check the environment variable set in Code Engine
-if [[ "${RUN_CLEANUP_JOB:-No}" == "Yes" ]]; then
-    echo "→ Proceed to Cleanup has been requested - triggering PVS-Clone-Cleanup..."
+ssh -q -i "$VSI_KEY_FILE" \
+  -o StrictHostKeyChecking=no \
+  -o UserKnownHostsFile=/dev/null \
+  ${SSH_USER}@${VSI_IP} \
+  "ssh -q -i /home/${SSH_USER}/.ssh/id_ed25519_vsi \
+       -o StrictHostKeyChecking=no \
+       -o UserKnownHostsFile=/dev/null \
+       ${SSH_USER}@${IBMI_CLONE_IP} \
+       'system \"STRSBS SBSD(QICC/QICCSBS)\"'" || {
+    echo "⚠ WARNING: ICC subsystem may already be active or failed to start"
+}
 
-    echo "→ Authenticating to IBM Cloud (Region: ${REGION})..."
-    ibmcloud login --apikey "$API_KEY" -r "$REGION" > /dev/null 2>&1 || {
-    echo "✗ ERROR: IBM Cloud login failed"
-    exit 1
-    }
-    echo "✓ Authentication successful"
-
-    # Ensure we target the correct resource group
-    echo "  Targeting resource group: cloud-techsales..."
-    ibmcloud target -g cloud-techsales || {
-        echo "⚠ WARNING: Unable to target resource group"
-    }
-
-    # Ensure we target the correct Code Engine project
-    echo "  Switching to Code Engine project: usnm-project..."
-    ibmcloud ce project target --name usnm-project > /dev/null 2>&1 || {
-        echo "⚠ WARNING: Unable to target Code Engine project 'usnm-project'"
-    }
-
-    echo "  Submitting Code Engine job: PVS-Clone-Cleanup..."
-
-    # Submit the job and capture output in JSON format
-    # Note: Using '|| true' to prevent this script from crashing if the submit fails
-    RAW_SUBMISSION=$(ibmcloud ce jobrun submit \
-        --job pvs-clone-cleanup \
-        --output json 2>&1 || true)
-
-    # Parse the new JobRun name using jq
-    NEXT_RUN=$(echo "$RAW_SUBMISSION" | jq -r '.metadata.name // .name // empty' 2>/dev/null || true)
-
-    if [[ -z "$NEXT_RUN" ]]; then
-        echo "⚠ WARNING: Cleanup job submission did not return a jobrun name"
-        echo ""
-        echo "Raw output:"
-        echo "$RAW_SUBMISSION"
-    else
-        echo "✓ PVS-Clone-Cleanup triggered successfully"
-        echo "  Jobrun instance: ${NEXT_RUN}"
-    fi
-else
-    # Logic when cleanup is NOT requested
-    echo "→ Proceed to Cleanup not set - skipping PVS-Clone-Cleanup."
-    echo "  The previous operations are complete."
-fi
-
+# Give the subsystem a moment to fully initialize
+sleep 5
+echo "✓ ICC/COS subsystem start command issued"
 echo ""
-echo "========================================================================"
-echo " JOB COMPLETE"
-echo "========================================================================"
-
-# Allow logs to flush to the console
-echo "Finalizing job logs..."
-sleep 60
-
 # Explicitly exit with 0 (Success)
 exit 0
