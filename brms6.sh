@@ -312,7 +312,7 @@ TODAY=$(date +%Y-%m-%d)
 # STEP 7: Verify Cloud Upload (Polling Loop)
 # ------------------------------------------------------------------------------
 echo "→ [STEP 7] Verifying backups in s3://${COS_BUCKET}/${BRMS_DIR}/..."
-echo "  Starting polling loop. Will check every 5 minutes for up to 1 hour."
+echo "  Starting polling loop. Will check every 5 minutes for up to 2 hours."
 
 # Configuration
 MAX_RETRIES=24       # 24 checks * 5 minutes = 120 minutes max
