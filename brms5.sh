@@ -136,7 +136,7 @@ echo ""
 BRMS_DIR="QBRMS_MURPHYXP"
 
 # 2. Get today's date in the format AWS CLI uses (YYYY-MM-DD)
-TODAY=$(date +%Y-%m-%d)
+#TODAY=$(date +%Y-%m-%d)
 
 
 # ------------------------------------------------------------------------------
@@ -157,10 +157,10 @@ for ((i=1; i<=MAX_RETRIES; i++)); do
 
     # 1. Define the remote command
     #    We rely on 'wc -l' to count the lines returned by the grep command
-    CHECK_CMD="PATH=/QOpenSys/pkgs/bin:/QOpenSys/usr/bin:\$PATH; export PATH; \
+     CHECK_CMD="PATH=/QOpenSys/pkgs/bin:/QOpenSys/usr/bin:\$PATH; export PATH; \
                aws --endpoint-url=${COS_ENDPOINT} s3 ls s3://${COS_BUCKET}/${BRMS_DIR}/ | \
-               grep \`date +%Y-%m-%d\` | \
-               awk '{print \$4}'"
+               grep -E 'Q08948|Q06687' | \
+               awk '{print \$4}'"  
 
     # 2. Execute via SSH and capture the output (filenames)
     #    We purposely capture stderr to /dev/null to keep the variable clean for counting
