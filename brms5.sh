@@ -146,7 +146,7 @@ echo "→ [STEP 7] Verifying backups in s3://${COS_BUCKET}/${BRMS_DIR}/..."
 echo "  Starting polling loop. Will check every 5 minutes for up to 1 hour."
 
 # Configuration
-MAX_RETRIES=24       # 24 checks * 5 minutes = 120 minutes max
+MAX_RETRIES=36       # 36 checks * 5 minutes = 180 minutes max
 SLEEP_SECONDS=300    # 5 minutes in seconds
 EXPECTED_VOLUMES=2   # <--- CHANGE THIS: The minimum number of files you expect (e.g., SYS + IPL = 2)
 FOUND_FILES=""
