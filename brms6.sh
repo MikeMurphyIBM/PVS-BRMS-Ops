@@ -204,7 +204,7 @@ ssh -q -i "$VSI_KEY_FILE" \
        -o StrictHostKeyChecking=no \
        -o UserKnownHostsFile=/dev/null \
        ${SSH_USER}@${IBMI_CLONE_IP} \
-       'system \"CHGS3RICC RSCNM(${CLOUD_RESOURCE}) RSCDSC(''BACKUPS FOR PVS'') KEYID(''${ACCESS_KEY}'') SECRETKEY(''${SECRET_KEY}'')\"'"
+       \"system \\\"CHGS3RICC RSCNM(${CLOUD_RESOURCE}) RSCDSC(BACKUPS_FOR_PVS) KEYID('${ACCESS_KEY}') SECRETKEY('${SECRET_KEY}')\\\"\""
 if [ $? -ne 0 ]; then
   echo "Critical Error: Failed to update credentials. Aborting."
   exit 1
