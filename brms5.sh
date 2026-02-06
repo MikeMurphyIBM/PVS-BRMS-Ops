@@ -50,6 +50,11 @@ readonly CONTROL_GROUP_2="QCLDCGRP01"     # Second backup control group
 readonly COS_ENDPOINT="https://s3.direct.us-south.cloud-object-storage.appdomain.cloud"
 readonly COS_BUCKET="murphy-bucket-pvs-backups"
 readonly COS_FILE="clnhist.file"
+readonly ACCESS_KEY="${COS_ACCESS_KEY}"
+readonly SECRET_KEY="${COS_SECRET_KEY}"
+
+# -- BRMS & Cloud Resource Settings --
+readonly CLOUD_RESOURCE="COSBACKUPS"
 
 # Save File Configuration
 readonly SAVF_LIB="CLDSTGTMP"
@@ -122,6 +127,28 @@ echo " Step 1 Complete: SSH keys installed"
 echo "------------------------------------------------------------------------"
 echo ""
 
+echo ""
+
+echo ""
+echo "STEP 3b:  Updating ICC Resource Credentials..."
+echo ""
+
+# Updating S3 ICC COS Credentials...
+# WRAPPED IN SSH TO EXECUTE ON THE CLONE
+ssh -q -i "$VSI_KEY_FILE" \
+  -o StrictHostKeyChecking=no \
+  -o UserKnownHostsFile=/dev/null \
+  ${SSH_USER}@${VSI_IP} \
+  "ssh -q -i /home/${SSH_USER}/.ssh/id_ed25519_vsi \
+       -o StrictHostKeyChecking=no \
+       -o UserKnownHostsFile=/dev/null \
+       ${SSH_USER}@${IBMI_CLONE_IP} \
+       'system \"CHGS3RICC RSCNM(${CLOUD_RESOURCE}) RSCDSC(''BACKUPS FOR PVS'') KEYID(''${ACCESS_KEY}'') SECRETKEY(''${SECRET_KEY}'')\"'"
+if [ $? -ne 0 ]; then
+  echo "Critical Error: Failed to update credentials. Aborting."
+  exit 1
+fi
+echo "Credentials updated successfully."
 echo ""
 
 echo ""
