@@ -166,53 +166,6 @@ ssh -q -i "$VSI_KEY_FILE" \
 
 echo "✓ BRMS state set to *STRBKU"
 echo ""
-
-
-echo "-----------------------------------------------------------------------------"
-echo " STEP 3: Start ICC/COS Subsystem"
-echo "-----------------------------------------------------------------------------"
-echo ""
-echo "→ [Step 3] Starting ICC/COS subsystem..."
-# We start the subsystem BEFORE backups to ensure cloud connectors are ready.
-# Source [1] indicates the subsystem handles file copy operations.
-
-ssh -q -i "$VSI_KEY_FILE" \
-  -o StrictHostKeyChecking=no \
-  -o UserKnownHostsFile=/dev/null \
-  ${SSH_USER}@${VSI_IP} \
-  "ssh -q -i /home/${SSH_USER}/.ssh/id_ed25519_vsi \
-       -o StrictHostKeyChecking=no \
-       -o UserKnownHostsFile=/dev/null \
-       ${SSH_USER}@${IBMI_CLONE_IP} \
-       'system \"STRSBS SBSD(QICC/QICCSBS)\"'" || {
-    echo "⚠ WARNING: ICC subsystem may already be active or failed to start"
-}
-
-# Give the subsystem a moment to fully initialize
-sleep 5
-echo "✓ ICC/COS subsystem start command issued"
-echo ""
-
-echo ""
-echo "STEP 3b:  Updating ICC Resource Credentials..."
-echo ""
-
-# Updating S3 ICC COS Credentials...
-# WRAPPED IN SSH TO EXECUTE ON THE CLONE
-ssh -q -i "$VSI_KEY_FILE" \
-  -o StrictHostKeyChecking=no \
-  -o UserKnownHostsFile=/dev/null \
-  ${SSH_USER}@${VSI_IP} \
-  "ssh -q -i /home/${SSH_USER}/.ssh/id_ed25519_vsi \
-       -o StrictHostKeyChecking=no \
-       -o UserKnownHostsFile=/dev/null \
-       ${SSH_USER}@${IBMI_CLONE_IP} \
-       \"system \\\"CHGS3RICC RSCNM(${CLOUD_RESOURCE}) RSCDSC(BACKUPS_FOR_PVS) KEYID('${ACCESS_KEY}') SECRETKEY('${SECRET_KEY}')\\\"\""
-if [ $? -ne 0 ]; then
-  echo "Critical Error: Failed to update credentials. Aborting."
-  exit 1
-fi
-echo "Credentials updated successfully."
 echo ""
 
 # Define Control Groups
@@ -262,7 +215,7 @@ echo "           Waiting for system to return online..."
 echo ""
 
 
-sleep 3600
+sleep 2700
 # Configuration for Polling
 MAX_RETRIES=18    # 18 attempts * 600 seconds = 3 hours max wait
 SLEEP_SEC=600       # Check every 10 minute
@@ -346,7 +299,7 @@ echo ""
 
 
 echo "-----------------------------------------------------------------------------"
-echo " STEP 6: Run USR BRMS Control Group"
+echo " STEP 6: Run USR01 BRMS Control Group"
 echo "-----------------------------------------------------------------------------"
 echo ""
 echo "→ [Step 4] Running Control Group: ${CONTROL_GROUP_1}..."
@@ -382,7 +335,7 @@ echo ""
 echo ""
 
 echo "-----------------------------------------------------------------------------"
-echo " STEP 7: Run GRP BRMS Control Group"
+echo " STEP 7: Run GRP01 BRMS Control Group"
 echo "-----------------------------------------------------------------------------"
 echo ""
 echo "  This will run synchronously and may take a long time..."
@@ -408,12 +361,59 @@ ssh -q -i "$VSI_KEY_FILE" \
 
 # Now check the captured return code safely
 if [ "$RETVAL" -ne 0 ]; then
-  echo "⚠️ [STEP 5] Backup completed with exit code $RETVAL."
+  echo "⚠️ [STEP 7] Backup completed with exit code $RETVAL."
   echo "  (This is expected behavior for Cloud Backups where media transfer happens later)."
   # Optional: You can proceed safely here.
 else
-  echo "✓ [STEP 5] Backup completed successfully."
+  echo "✓ [STEP 7] Backup completed successfully."
 fi
+
+echo "-----------------------------------------------------------------------------"
+echo " STEP 3: Start ICC/COS Subsystem"
+echo "-----------------------------------------------------------------------------"
+echo ""
+echo "→ [Step 3] Starting ICC/COS subsystem..."
+# We start the subsystem BEFORE backups to ensure cloud connectors are ready.
+# Source [1] indicates the subsystem handles file copy operations.
+
+ssh -q -i "$VSI_KEY_FILE" \
+  -o StrictHostKeyChecking=no \
+  -o UserKnownHostsFile=/dev/null \
+  ${SSH_USER}@${VSI_IP} \
+  "ssh -q -i /home/${SSH_USER}/.ssh/id_ed25519_vsi \
+       -o StrictHostKeyChecking=no \
+       -o UserKnownHostsFile=/dev/null \
+       ${SSH_USER}@${IBMI_CLONE_IP} \
+       'system \"STRSBS SBSD(QICC/QICCSBS)\"'" || {
+    echo "⚠ WARNING: ICC subsystem may already be active or failed to start"
+}
+
+# Give the subsystem a moment to fully initialize
+sleep 5
+echo "✓ ICC/COS subsystem start command issued"
+echo ""
+
+echo ""
+echo "STEP 3b:  Updating ICC Resource Credentials..."
+echo ""
+
+# Updating S3 ICC COS Credentials...
+# WRAPPED IN SSH TO EXECUTE ON THE CLONE
+ssh -q -i "$VSI_KEY_FILE" \
+  -o StrictHostKeyChecking=no \
+  -o UserKnownHostsFile=/dev/null \
+  ${SSH_USER}@${VSI_IP} \
+  "ssh -q -i /home/${SSH_USER}/.ssh/id_ed25519_vsi \
+       -o StrictHostKeyChecking=no \
+       -o UserKnownHostsFile=/dev/null \
+       ${SSH_USER}@${IBMI_CLONE_IP} \
+       \"system \\\"CHGS3RICC RSCNM(${CLOUD_RESOURCE}) RSCDSC(BACKUPS_FOR_PVS) KEYID('${ACCESS_KEY}') SECRETKEY('${SECRET_KEY}')\\\"\""
+if [ $? -ne 0 ]; then
+  echo "Critical Error: Failed to update credentials. Aborting."
+  exit 1
+fi
+echo "Credentials updated successfully."
+echo ""
 
 echo ""
 echo "-----------------------------------------------------------------------------"
