@@ -261,6 +261,8 @@ echo "→ [Step 5] The system is now backing up and will IPL automatically."
 echo "           Waiting for system to return online..."
 echo ""
 
+
+sleep 3600
 # Configuration for Polling
 MAX_RETRIES=18    # 18 attempts * 600 seconds = 3 hours max wait
 SLEEP_SEC=600       # Check every 10 minute
