@@ -435,7 +435,7 @@ if [ "$RETVAL" -ne 0 ]; then
     echo "  (This is common for STRMNTBRM if there were minor warnings or locked files)."
     echo "  Proceeding to finalization..."
 else
-    echo "✓ [STEP 6] Maintenance completed successfully."
+    echo "✓ [STEP 7b] Maintenance completed successfully."
 fi
 
 echo ""
