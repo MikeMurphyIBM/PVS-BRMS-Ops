@@ -262,7 +262,7 @@ echo "           Waiting for system to return online..."
 echo ""
 
 # Configuration for Polling
-MAX_RETRIES=18    # 180 attempts * 60 seconds = 3 hours max wait
+MAX_RETRIES=18    # 18 attempts * 600 seconds = 3 hours max wait
 SLEEP_SEC=600       # Check every 10 minute
 
 # -------------------------------------------------------------------------
@@ -344,7 +344,7 @@ echo ""
 
 
 echo "-----------------------------------------------------------------------------"
-echo " STEP 4: Run 1st BRMS Control Group"
+echo " STEP 6: Run USR BRMS Control Group"
 echo "-----------------------------------------------------------------------------"
 echo ""
 echo "→ [Step 4] Running Control Group: ${CONTROL_GROUP_1}..."
@@ -380,7 +380,7 @@ echo ""
 echo ""
 
 echo "-----------------------------------------------------------------------------"
-echo " STEP 5: Run 2nd BRMS Control Group"
+echo " STEP 7: Run GRP BRMS Control Group"
 echo "-----------------------------------------------------------------------------"
 echo ""
 echo "  This will run synchronously and may take a long time..."
@@ -415,11 +415,11 @@ fi
 
 echo ""
 echo "-----------------------------------------------------------------------------"
-echo " STEP 6: Run BRMS Maintenance to clean up files and move media to COS"
+echo " STEP 8: Run BRMS Maintenance to clean up files and move media to COS"
 echo "------------------------------------------------------------------------------"
 echo ""
 
-echo "→ [STEP 6] Running BRMS Maintenance..."
+echo "→ [STEP 8] Running BRMS Maintenance..."
 
 # Initialize variable
 RETVAL=0
@@ -452,7 +452,7 @@ fi
 echo ""
 echo ""
 echo "-----------------------------------------------------------------------------"
-echo " STEP 7: Check COS for successful uploads of latest BRMS backup files"
+echo " STEP 9: Check COS for successful uploads of latest BRMS backup files"
 echo "------------------------------------------------------------------------------"
 echo ""
 
@@ -468,13 +468,13 @@ TODAY=$(date +%Y-%m-%d)
 # ------------------------------------------------------------------------------
 # STEP 7: Verify Cloud Upload (Polling Loop)
 # ------------------------------------------------------------------------------
-echo "→ [STEP 7] Verifying backups in s3://${COS_BUCKET}/${BRMS_DIR}/..."
+echo "→ [STEP 9] Verifying backups in s3://${COS_BUCKET}/${BRMS_DIR}/..."
 echo "  Starting polling loop. Will check every 5 minutes for up to 3 hours."
 
 # Configuration
 MAX_RETRIES=36       # 36 checks * 5 minutes = 180 minutes max
 SLEEP_SECONDS=300    # 5 minutes in seconds
-EXPECTED_VOLUMES=2   # <--- CHANGE THIS: The minimum number of files you expect (e.g., SYS + IPL = 2)
+EXPECTED_VOLUMES=4   # <--- CHANGE THIS: The minimum number of files you expect (e.g., SYS + IPL = 2)
 FOUND_FILES=""
 
 # Start the loop
@@ -534,11 +534,11 @@ fi
 
 echo ""
 echo "-----------------------------------------------------------------------------"
-echo " STEP 7b: Run BRMS Maintenance to inform directory of successful transfer"
+echo " STEP 9b: Run BRMS Maintenance to inform directory of successful transfer"
 echo "------------------------------------------------------------------------------"
 echo ""
 
-echo "→ [STEP 7b] Running BRMS Maintenance..."
+echo "→ [STEP 9b] Running BRMS Maintenance..."
 
 # Initialize variable
 RETVAL=0
@@ -570,14 +570,14 @@ fi
 
 echo ""
 echo "-----------------------------------------------------------------------------"
-echo " STEP 8: BRMS Flashcopy status change and QUSRBRM file history saved"
+echo " STEP 10: BRMS Flashcopy status change and QUSRBRM file history saved"
 echo "------------------------------------------------------------------------------"
 echo ""
-echo "→ [STEP 8] Finalizing BRMS FlashCopy state and saving QUSRBRM history..."
+echo "→ [STEP 10] Finalizing BRMS FlashCopy state and saving QUSRBRM history..."
 
 # 8a. Update BRMS State to *ENDBKU
 # This tells BRMS the backup is finished so the history is marked complete.
-echo "  [Step 8] Setting BRMS state to *ENDBKU..."
+echo "  [Step 10] Setting BRMS state to *ENDBKU..."
 ssh -q -i "$VSI_KEY_FILE" $SSH_OPTS ${SSH_USER}@${VSI_IP} \
    "ssh -q -i /home/${SSH_USER}/.ssh/id_ed25519_vsi $SSH_OPTS ${SSH_USER}@${IBMI_CLONE_IP} \
    'system \"INZBRM OPTION(*FLASHCOPY) STATE(*ENDBKU)\"'" || {
@@ -587,7 +587,7 @@ ssh -q -i "$VSI_KEY_FILE" $SSH_OPTS ${SSH_USER}@${VSI_IP} \
 
 # 8b. Prepare Scratch Library (CLDSTGTMP)
 # We use '|| true' on DLTLIB so the script doesn't fail if the library doesn't exist yet.
-echo "  [8b] preparing temporary library CLDSTGTMP..."
+echo "  [10b] preparing temporary library CLDSTGTMP..."
 ssh -q -i "$VSI_KEY_FILE" $SSH_OPTS ${SSH_USER}@${VSI_IP} \
    "ssh -q -i /home/${SSH_USER}/.ssh/id_ed25519_vsi $SSH_OPTS ${SSH_USER}@${IBMI_CLONE_IP} \
    'system \"DLTLIB LIB(CLDSTGTMP)\" > /dev/null 2>&1 || true; \
@@ -599,7 +599,7 @@ ssh -q -i "$VSI_KEY_FILE" $SSH_OPTS ${SSH_USER}@${VSI_IP} \
 
 # 8c. Save QUSRBRM to the Save File
 # We omit journals to save space/time as they aren't strictly needed for history merging.
-echo "  [8c] Saving QUSRBRM to save file..."
+echo "  [10c] Saving QUSRBRM to save file..."
 ssh -q -i "$VSI_KEY_FILE" $SSH_OPTS ${SSH_USER}@${VSI_IP} \
    "ssh -q -i /home/${SSH_USER}/.ssh/id_ed25519_vsi $SSH_OPTS ${SSH_USER}@${IBMI_CLONE_IP} \
    'system \"SAVLIB LIB(QUSRBRM) DEV(*SAVF) SAVF(CLDSTGTMP/CLNHIST) OMITOBJ((*ALL *JRN) (*ALL *JRNRCV))\"'" || {
@@ -609,7 +609,7 @@ ssh -q -i "$VSI_KEY_FILE" $SSH_OPTS ${SSH_USER}@${VSI_IP} \
 
 # 8d. Upload the Save File to Cloud Object Storage
 # We use the specific PATH export required for the PASE shell.
-echo "  [8d] Uploading QUSRBRM save file to COS..."
+echo "  [10d] Uploading QUSRBRM save file to COS..."
 UPLOAD_CMD="PATH=/QOpenSys/pkgs/bin:\$PATH; export PATH; \
             cat /qsys.lib/cldstgtmp.lib/clnhist.file | \
             aws --endpoint-url=${COS_ENDPOINT} s3 cp - s3://${COS_BUCKET}/clnhist.file"
@@ -634,10 +634,10 @@ echo "========================================================================"
 echo ""
 
 echo "-----------------------------------------------------------------------------"
-echo " STEP 9: Create Library and Save File on Source LPAR"
+echo " STEP 11: Create Library and Save File on Source LPAR"
 echo "-----------------------------------------------------------------------------"
 echo ""
-echo "→ [STEP 9] Creating library ${SAVF_LIB}..."
+echo "→ [STEP 11] Creating library ${SAVF_LIB}..."
 
 # 1. Create the Library (Ignore failure if it already exists)
 ssh -q -i "$VSI_KEY_FILE" \
@@ -652,7 +652,7 @@ ssh -q -i "$VSI_KEY_FILE" \
     echo "⚠ WARNING: Library ${SAVF_LIB} exists or could not be created. Proceeding..."
 }
 
-echo "→ [STEP 9] Preparing Save File (Delete old version if exists)..."
+echo "→ [STEP 12] Preparing Save File (Delete old version if exists)..."
 
 # 2. Delete the old Save File (Ignore failure if file doesn't exist)
 # We accept failure here (|| true) because it's okay if the file isn't there to delete.
@@ -667,10 +667,10 @@ ssh -q -i "$VSI_KEY_FILE" \
        'system \"DLTF FILE(${SAVF_LIB}/${SAVF_NAME})\"'" || true
 
 # 3. Wait briefly to ensure the object lock is released
-echo "→ [STEP 9] Waiting 5 seconds for system cleanup..."
+echo "→ [STEP 12] Waiting 5 seconds for system cleanup..."
 sleep 5
 
-echo "→ [STEP 9] Creating new Save File..."
+echo "→ [STEP 13] Creating new Save File..."
 
 # 4. Create the new Save File (This must succeed)
 ssh -q -i "$VSI_KEY_FILE" \
@@ -691,10 +691,10 @@ echo "✓ Library and save file created on source LPAR"
 echo ""
 
 echo "-----------------------------------------------------------------------------"
-echo " STEP 10: Download BRMS History File from COS to the Source LPAR"
+echo " STEP 14: Download BRMS History File from COS to the Source LPAR"
 echo "-----------------------------------------------------------------------------"
 echo ""
-echo "→ [STEP 10] Downloading history file from COS to source LPAR..."
+echo "→ [STEP 14] Downloading history file from COS to source LPAR..."
 # Note: We split the PATH definition and export to ensure compatibility 
 # with the IBM i shell (bsh). The file is downloaded to /tmp first 
 # because AWS CLI cannot write to *SAVF directly
@@ -718,10 +718,10 @@ echo "✓ History file downloaded to /tmp/${COS_FILE}"
 echo ""
 
 echo "-----------------------------------------------------------------------------"
-echo " STEP 11:  Copy Stream File to Save File"
+echo " STEP 15:  Copy Stream File to Save File"
 echo "-----------------------------------------------------------------------------"
 echo ""
-echo "→ [STEP 11] Copying stream file to QSYS save file..."
+echo "→ [STEP 15] Copying stream file to QSYS save file..."
 # We use CPYFRMSTMF with CVTDTA(*NONE) to ensure the binary Save File data
 # is not corrupted by ASCII/EBCDIC conversion during the move to QSYS [1].
 
@@ -742,10 +742,10 @@ echo "✓ Stream file copied to ${SAVF_PATH_QSYS}"
 echo ""
 
 echo "-----------------------------------------------------------------------------"
-echo " STEP 12: Restore QUSRBRM to Temporary Library"
+echo " STEP 16: Restore QUSRBRM to Temporary Library"
 echo "-----------------------------------------------------------------------------"
 echo ""
-echo "→ [STEP 12] Restoring QUSRBRM to temporary library TMPHSTLIB..."
+echo "→ [STEP 16] Restoring QUSRBRM to temporary library TMPHSTLIB..."
 # We restore to TMPHSTLIB because we cannot overwrite the active QUSRBRM.
 # The merge command in the next step requires the data to be in a separate library [3].
 
@@ -771,10 +771,10 @@ echo "✓ QUSRBRM restored to TMPHSTLIB"
 echo ""
 
 echo "-----------------------------------------------------------------------------"
-echo " STEP 13: Merge History into Live BRMS Database"
+echo " STEP 17: Merge History into Live BRMS Database"
 echo "-----------------------------------------------------------------------------"
 echo ""
-echo "→ [STEP 13] Merging history into live BRMS database..."
+echo "→ [STEP 17] Merging history into live BRMS database..."
 # INZBRM *MERGE consolidates the backup history from the clone into the source.
 # This ensures the source system "knows" about the backups performed in the cloud [2].
 
@@ -796,10 +796,10 @@ echo "✓ BRMS history merged successfully"
 echo ""
 
 echo "-----------------------------------------------------------------------------"
-echo " STEP 14: End BRMS Flashcopy Process State"
+echo " STEP 18: End BRMS Flashcopy Process State"
 echo "-----------------------------------------------------------------------------"
 echo ""
-echo "→ [STEP 14] Finalizing BRMS FlashCopy state..."
+echo "→ [STEP 18] Finalizing BRMS FlashCopy state..."
 # This command sets the BRMS FlashCopy state to complete mode (*ENDPRC).
 # It automatically starts the Q1ABRMNET subsystem and resumes BRMS network 
 # synchronization, allowing the system to communicate with other nodes [Source 597].
@@ -822,11 +822,11 @@ echo "✓ BRMS state set to *ENDPRC - normal operations resumed"
 echo ""
 
 echo "-----------------------------------------------------------------------------"
-echo " STEP 14b: Run BRMS Maintenance on Source to finalize database updates"
+echo " STEP 18b: Run BRMS Maintenance on Source to finalize database updates"
 echo "------------------------------------------------------------------------------"
 echo ""
 
-echo "→ [STEP 14b] Running BRMS Maintenance on Source LPAR (${IBMI_SOURCE_IP})..."
+echo "→ [STEP 18b] Running BRMS Maintenance on Source LPAR (${IBMI_SOURCE_IP})..."
 
 # Initialize variable
 RETVAL=0
@@ -860,10 +860,10 @@ fi
 echo ""
 
 echo "-----------------------------------------------------------------------------"
-echo " STEP 15: Delete Temporary Library"
+echo " STEP 19: Delete Temporary Library"
 echo "-----------------------------------------------------------------------------"
 echo ""
-echo "→ [STEP 15] Deleting temporary library TMPHSTLIB..."
+echo "→ [STEP 19] Deleting temporary library TMPHSTLIB..."
 # The history data has been merged into the production QUSRBRM library.
 # We can now safely remove the temporary restore library [Source 723].
 
@@ -884,10 +884,10 @@ echo "✓ TMPHSTLIB deleted"
 echo ""
 
 echo "-----------------------------------------------------------------------------"
-echo " STEP 16: Delete Save File"
+echo " STEP 20: Delete Save File"
 echo "-----------------------------------------------------------------------------"
 echo ""
-echo "→ [STEP 16] Deleting save file..."
+echo "→ [STEP 20] Deleting save file..."
 
 ssh -q -i "$VSI_KEY_FILE" \
   -o StrictHostKeyChecking=no \
@@ -909,10 +909,10 @@ echo ""
 # STEP 17: Delete Library (Corrected to prevent script exit on warnings)
 # -----------------------------------------------------------------------------
 echo "-----------------------------------------------------------------------------"
-echo " STEP 17: Delete Library"
+echo " STEP 21: Delete Library"
 echo "-----------------------------------------------------------------------------"
 echo ""
-echo "→ [STEP 17] Deleting library ${SAVF_LIB}..."
+echo "→ [STEP 22] Deleting library ${SAVF_LIB}..."
 
 # We append '|| true' to ensure that even if DLTLIB returns a warning/escape message,
 # the script considers this step successful and proceeds to the summary.
