@@ -144,7 +144,7 @@ WAIT_LONG=300        # 300 seconds (5 minutes for IPL)
 # -----------------------------------------------------------
 
 # Enable debug mode to show exact commands being executed
-set -x 
+#set -x 
 
 echo "   -> Phase A: Waiting for system to go OFFLINE..."
 COUNTER=0
@@ -244,7 +244,7 @@ if [ "$SSH_SUCCESS" = false ]; then
 fi
 
 # Disable debug mode
-set +x
+#set +x
 
 echo "✓ [STEP 5] Complete."
 
