@@ -19,7 +19,7 @@ exec > >(timestamp) 2>&1
 # ------------------------------------------------------------------------------
 # STRICT ERROR HANDLING
 # ------------------------------------------------------------------------------
-set -eu
+#set -eu
 
 ################################################################################
 # BANNER
@@ -129,30 +129,33 @@ echo ""
 
 echo ""
 
-echo "------------------------------------------------------------------------"
-echo "Sub-Step 5a: Wait for Network Drop (Confirm Restricted State)"
-echo "------------------------------------------------------------------------"
+echo "-----------------------------------------------------------------------------"
+echo " STEP 5: Monitor System State (Wait for Down -> Wait for Up)"
+echo "-----------------------------------------------------------------------------"
+
+# --- MISSING VARIABLES ADDED HERE ---
+MAX_RETRIES_DOWN=12   # Wait up to 60 mins for system to go down
+MAX_RETRIES_UP=36    # Wait up to 3 hours for system to come back up
+SLEEP_SEC=300          # Check every 60 seconds
+# ------------------------------------
+
 echo "   -> Phase A: Waiting for system to go OFFLINE (Processing SYS Group)..."
 COUNTER=0
 IS_DOWN=false
 
 while [ $COUNTER -lt $MAX_RETRIES_DOWN ]; do
-    # FIX: Run the command directly inside the 'if' condition.
-    # The '!' means "if this command fails". This prevents 'set -e' from killing the script.
+    # Check if Ping fails (System Down)
     if ! ssh -q -i "$VSI_KEY_FILE" \
             -o StrictHostKeyChecking=no \
             -o ConnectTimeout=5 \
             ${SSH_USER}@${VSI_IP} \
             "ping -c 1 -W 1 ${IBMI_CLONE_IP} > /dev/null 2>&1"; then
         
-        # If we are here, the ping FAILED (Exit Code != 0), so the system is DOWN.
         echo ""
-        echo "✓ [Step 5a] Connection lost! System has entered restricted state."
+        echo "✓ [$(date +%T)] Connection lost! System has entered restricted state."
         IS_DOWN=true
         break
     else
-        # If we are here, the ping SUCCEEDED, so the system is still UP.
-        # We use $(date) to force a change in output, helping bypass log buffering.
         echo "[$(date +%T)] Status: Still Online... waiting for restricted state."
         sleep $SLEEP_SEC
         ((COUNTER++))
@@ -162,27 +165,23 @@ done
 if [ "$IS_DOWN" = false ]; then
     echo ""
     echo "⚠️ [Step 5a] WARNING: System did not go down after 60 minutes."
-    echo "   The SYS group may have hung, or the job failed before ENDSBS."
-    echo "   Check logs manually. Terminating script to prevent false positives."
     exit 1
 fi
 
 echo ""
-echo "   -> System is verified down. Now waiting for IPL01 Control Group to process and IPL/Restart..."
+echo "   -> System is verified down. Now waiting for IPL to complete..."
 echo ""
 
-echo "-------------------------------------------------------------------------"
-echo "Sub-Step 5b: Wait for Network Recovery (IPL Complete)"
-echo "-------------------------------------------------------------------------"
+# -------------------------------------------------------------------------
+# Sub-Step 5b: Wait for Network Recovery
+# -------------------------------------------------------------------------
 echo "   -> Phase B: Polling for PING response (System Coming Online)..."
 
 COUNTER=0
 PING_SUCCESS=false
 
 while [ $COUNTER -lt $MAX_RETRIES_UP ]; do
-    # FIX: Run command directly in 'if'. 
-    # If ping succeeds (Exit Code 0), we enter the 'then' block.
-    # If ping fails (Exit Code != 0), we enter the 'else' block (without crashing).
+    # Check if Ping succeeds (System Up)
     if ssh -q -i "$VSI_KEY_FILE" \
             -o StrictHostKeyChecking=no \
             -o ConnectTimeout=5 \
@@ -190,7 +189,7 @@ while [ $COUNTER -lt $MAX_RETRIES_UP ]; do
             "ping -c 1 -W 1 ${IBMI_CLONE_IP} > /dev/null 2>&1"; then
         
         echo ""
-        echo "✓ [Step 5b] PING Successful! System is back online."
+        echo "✓ [$(date +%T)] PING Successful! System is back online."
         PING_SUCCESS=true
         break
     else
@@ -205,6 +204,7 @@ if [ "$PING_SUCCESS" = false ]; then
     echo "❌ [Step 5b] Timeout: System failed to respond to PING after 3 hours."
     exit 1
 fi
+
 echo ""
 
 echo "-------------------------------------------------------------------------"
