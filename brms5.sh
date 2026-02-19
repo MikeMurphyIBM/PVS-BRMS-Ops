@@ -129,135 +129,138 @@ echo ""
 
 echo ""
 
-
-
-
-
 echo "-----------------------------------------------------------------------------"
-echo " STEP 13: Merge History into Live BRMS Database"
+echo " STEP 5: Monitor System State (Wait for Down -> Wait for Up)"
 echo "-----------------------------------------------------------------------------"
 echo ""
-echo "→ [STEP 13] Merging history into live BRMS database..."
-# INZBRM *MERGE consolidates the backup history from the clone into the source.
-# This ensures the source system "knows" about the backups performed in the cloud [2].
+echo "→ [Step 5] The backup job is running."
+echo "           We must wait for the system to go OFFLINE (Restricted State)"
+echo "           and then wait for it to come back ONLINE (IPL Complete)."
+echo ""
 
-ssh -q -i "$VSI_KEY_FILE" \
-  -o StrictHostKeyChecking=no \
-  -o UserKnownHostsFile=/dev/null \
-  ${SSH_USER}@${VSI_IP} \
-  "ssh -q -i /home/${SSH_USER}/.ssh/id_ed25519_vsi \
-       -o StrictHostKeyChecking=no \
-       -o UserKnownHostsFile=/dev/null \
-       ${SSH_USER}@${IBMI_SOURCE_IP} \
-       'system \"INZBRM OPTION(*MERGE) FROMLIB(TMPHSTLIB) TOLIB(QUSRBRM) MERGE(*ARC *BKU *MED)\"'" || {
-    echo "✗ ERROR: Failed to merge BRMS history"
+# Configuration
+# Max wait for system to GO DOWN (e.g., 60 mins for SYS group to finish)
+MAX_RETRIES_DOWN=12 
+# Max wait for system to COME UP (e.g., 3 hours for IPL group + Reboot)
+MAX_RETRIES_UP=30  
+SLEEP_SEC=300        # Check every 300 seconds
+
+echo "------------------------------------------------------------------------"
+echo "Sub-Step 5a: Wait for Network Drop (Confirm Restricted State)"
+echo "------------------------------------------------------------------------"
+echo "   -> Phase A: Waiting for system to go OFFLINE (Processing SYS Group)..."
+COUNTER=0
+IS_DOWN=false
+
+while [ $COUNTER -lt $MAX_RETRIES_DOWN ]; do
+    # Ping the IBM i. We want this to FAIL.
+    ssh -q -i "$VSI_KEY_FILE" \
+        -o StrictHostKeyChecking=no \
+        ${SSH_USER}@${VSI_IP} \
+        "ping -c 1 -W 1 ${IBMI_CLONE_IP} > /dev/null 2>&1"
+    
+    # Capture exit code: 0 = Success (Up), Non-Zero = Failure (Down)
+    if [ $? -ne 0 ]; then
+        echo ""
+        echo "✓ [Step 5a] Connection lost! System has entered restricted state."
+        IS_DOWN=true
+        break
+    else
+        # System is still up, print dot and wait
+        printf "Still Online"
+        sleep $SLEEP_SEC
+        ((COUNTER++))
+    fi
+done
+
+if [ "$IS_DOWN" = false ]; then
+    echo ""
+    echo "⚠️ [Step 5a] WARNING: System did not go down after 60 minutes."
+    echo "   The SYS group may have hung, or the job failed before ENDSBS."
+    echo "   Check logs manually. Terminating script to prevent false positives."
     exit 1
-}
+fi
 
 echo ""
-echo "✓ BRMS history merged successfully"
+echo "   -> System is verified down. Now waiting for IPL01 Control Group to process and IPL/Restart..."
 echo ""
 
-echo "-----------------------------------------------------------------------------"
-echo " STEP 14: End BRMS Flashcopy Process State"
-echo "-----------------------------------------------------------------------------"
-echo ""
-echo "→ [STEP 14] Finalizing BRMS FlashCopy state..."
-# This command sets the BRMS FlashCopy state to complete mode (*ENDPRC).
-# It automatically starts the Q1ABRMNET subsystem and resumes BRMS network 
-# synchronization, allowing the system to communicate with other nodes [Source 597].
+echo "-------------------------------------------------------------------------"
+echo "Sub-Step 5b: Wait for Network Recovery (IPL Complete)"
+echo "-------------------------------------------------------------------------"
+echo "   -> Phase B: Polling for PING response (System Coming Online)..."
 
-ssh -q -i "$VSI_KEY_FILE" \
-  -o StrictHostKeyChecking=no \
-  -o UserKnownHostsFile=/dev/null \
-  ${SSH_USER}@${VSI_IP} \
-  "ssh -q -i /home/${SSH_USER}/.ssh/id_ed25519_vsi \
-       -o StrictHostKeyChecking=no \
-       -o UserKnownHostsFile=/dev/null \
-       ${SSH_USER}@${IBMI_SOURCE_IP} \
-       'system \"INZBRM OPTION(*FLASHCOPY) STATE(*ENDPRC)\"'" || {
-    echo "✗ ERROR: Failed to set BRMS state to *ENDPRC"
+COUNTER=0
+PING_SUCCESS=false
+
+while [ $COUNTER -lt $MAX_RETRIES_UP ]; do
+    # Ping the IBM i. Now we want this to SUCCEED.
+    ssh -q -i "$VSI_KEY_FILE" \
+        -o StrictHostKeyChecking=no \
+        ${SSH_USER}@${VSI_IP} \
+        "ping -c 1 -W 1 ${IBMI_CLONE_IP} > /dev/null 2>&1"
+    
+    if [ $? -eq 0 ]; then
+        echo ""
+        echo "✓ [Step 5b] PING Successful! System is back online."
+        PING_SUCCESS=true
+        break
+    else
+        printf "Still Offline"
+        sleep $SLEEP_SEC
+        ((COUNTER++))
+    fi
+done
+
+if [ "$PING_SUCCESS" = false ]; then
+    echo ""
+    echo "❌ [Step 5b] Timeout: System failed to respond to PING after 3 hours."
     exit 1
-}
+fi
 
 echo ""
-echo "✓ BRMS state set to *ENDPRC - normal operations resumed"
-echo ""
 
-echo "-----------------------------------------------------------------------------"
-echo " STEP 15: Delete Temporary Library"
-echo "-----------------------------------------------------------------------------"
-echo ""
-echo "→ [STEP 15] Deleting temporary library TMPHSTLIB..."
-# The history data has been merged into the production QUSRBRM library.
-# We can now safely remove the temporary restore library [Source 723].
+echo "-------------------------------------------------------------------------"
+echo "Sub-Step 5c: SSH Loop (Wait for SSHD Service)"
+echo "-------------------------------------------------------------------------"
+echo "   -> Phase C: Polling for SSH Service availability..."
 
-ssh -q -i "$VSI_KEY_FILE" \
-  -o StrictHostKeyChecking=no \
-  -o UserKnownHostsFile=/dev/null \
-  ${SSH_USER}@${VSI_IP} \
-  "ssh -q -i /home/${SSH_USER}/.ssh/id_ed25519_vsi \
-       -o StrictHostKeyChecking=no \
-       -o UserKnownHostsFile=/dev/null \
-       ${SSH_USER}@${IBMI_SOURCE_IP} \
-       'system \"DLTLIB LIB(TMPHSTLIB)\"'" || {
-    echo "⚠ WARNING: Failed to delete TMPHSTLIB"
-}
+COUNTER=0
+SSH_SUCCESS=false
 
-echo ""
-echo "✓ TMPHSTLIB deleted"
-echo ""
+# We wait a bit longer here (retry 20 times = 20 mins approx) once Ping is up
+while [ $COUNTER -lt 20 ]; do
+    ssh -q -i "$VSI_KEY_FILE" \
+      -o StrictHostKeyChecking=no \
+      -o UserKnownHostsFile=/dev/null \
+      -o ConnectTimeout=10 \
+      ${SSH_USER}@${VSI_IP} \
+      "ssh -q -i /home/${SSH_USER}/.ssh/id_ed25519_vsi \
+           -o StrictHostKeyChecking=no \
+           -o UserKnownHostsFile=/dev/null \
+           -o ConnectTimeout=10 \
+           ${SSH_USER}@${IBMI_CLONE_IP} \
+           'system \"DSPSYSVAL QTIME\"' > /dev/null 2>&1"
+           
+    if [ $? -eq 0 ]; then
+        echo "✓ [Step 5b] SSH Successful! System is ready."
+        SSH_SUCCESS=true
+        break
+    else
+        echo "      ... SSH not ready yet. Waiting 30s..."
+        sleep 30
+        ((COUNTER++))
+    fi
+done
 
-echo "-----------------------------------------------------------------------------"
-echo " STEP 16: Delete Save File"
-echo "-----------------------------------------------------------------------------"
-echo ""
-echo "→ [STEP 16] Deleting save file..."
-
-ssh -q -i "$VSI_KEY_FILE" \
-  -o StrictHostKeyChecking=no \
-  -o UserKnownHostsFile=/dev/null \
-  ${SSH_USER}@${VSI_IP} \
-  "ssh -q -i /home/${SSH_USER}/.ssh/id_ed25519_vsi \
-       -o StrictHostKeyChecking=no \
-       -o UserKnownHostsFile=/dev/null \
-       ${SSH_USER}@${IBMI_SOURCE_IP} \
-       'system \"DLTF FILE(${SAVF_LIB}/${SAVF_NAME})\"'" || {
-    echo "⚠ WARNING: Failed to delete save file"
-}
-
-echo ""
-echo "✓ Save file deleted"
-echo ""
+if [ "$SSH_SUCCESS" = false ]; then
+    echo "❌ [Step 5c] Timeout: System is pingable but SSH service did not start."
+    exit 1
+fi
 
 
-# STEP 17: Delete Library (Corrected to prevent script exit on warnings)
-# -----------------------------------------------------------------------------
-echo "-----------------------------------------------------------------------------"
-echo " STEP 17: Delete Library"
-echo "-----------------------------------------------------------------------------"
-echo ""
-echo "→ [STEP 17] Deleting library ${SAVF_LIB}..."
 
-# We append '|| true' to ensure that even if DLTLIB returns a warning/escape message,
-# the script considers this step successful and proceeds to the summary.
-# Source: BRMS maintenance/cleanup often generates informational messages treated as non-zero codes [1].
-ssh -q -i "$VSI_KEY_FILE" \
-  -o StrictHostKeyChecking=no \
-  -o UserKnownHostsFile=/dev/null \
-  ${SSH_USER}@${VSI_IP} \
-  "ssh -q -i /home/${SSH_USER}/.ssh/id_ed25519_vsi \
-       -o StrictHostKeyChecking=no \
-       -o UserKnownHostsFile=/dev/null \
-       ${SSH_USER}@${IBMI_SOURCE_IP} \
-       'system \"DLTLIB LIB(${SAVF_LIB})\"'" || true
 
-echo "✓ Library ${SAVF_LIB} deletion attempted (Cleaning up)."
-echo ""
-echo "-----------------------------------------------------------------------"
-echo " Source LPAR BRMS Operations Complete"
-echo "-----------------------------------------------------------------------"
-echo ""
 
 sleep 5
 
