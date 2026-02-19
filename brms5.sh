@@ -133,18 +133,30 @@ echo "--------------------------------------------------------------------------
 echo " STEP 5: Monitor System State (Wait for Down -> Wait for Up)"
 echo "-----------------------------------------------------------------------------"
 
-# --- MISSING VARIABLES ADDED HERE ---
-MAX_RETRIES_DOWN=12   # Wait up to 60 mins for system to go down
-MAX_RETRIES_UP=36    # Wait up to 3 hours for system to come back up
-SLEEP_SEC=300          # Check every 60 seconds
-# ------------------------------------
+# --- Configuration ---------------------------------------------------------
+# Phase A: Wait for Down (Check every 1 minute for 1 hour)
+MAX_RETRIES_DOWN=60
+SLEEP_DOWN_SEC=60
 
+# Phase B: Wait for IPL (Check every 5 minutes for 2 hours)
+MAX_RETRIES_UP=24     # 24 * 5 mins = 120 mins (2 Hours)
+SLEEP_UP_SEC=300      # 300 seconds = 5 Minutes
+
+# Phase C: Wait for SSH (Check every 30 seconds for 10 minutes)
+MAX_RETRIES_SSH=20
+SLEEP_SSH_SEC=30
+# ---------------------------------------------------------------------------
+
+# ---------------------------------------------------------------------------
+# Sub-Step 5a: Wait for Network Drop (Confirm Restricted State)
+# ---------------------------------------------------------------------------
+echo ""
 echo "   -> Phase A: Waiting for system to go OFFLINE (Processing SYS Group)..."
 COUNTER=0
 IS_DOWN=false
 
 while [ $COUNTER -lt $MAX_RETRIES_DOWN ]; do
-    # Check if Ping fails (System Down)
+    # Logic: If Ping FAILS (!), the system is DOWN.
     if ! ssh -q -i "$VSI_KEY_FILE" \
             -o StrictHostKeyChecking=no \
             -o ConnectTimeout=5 \
@@ -157,31 +169,26 @@ while [ $COUNTER -lt $MAX_RETRIES_DOWN ]; do
         break
     else
         echo "[$(date +%T)] Status: Still Online... waiting for restricted state."
-        sleep $SLEEP_SEC
+        sleep $SLEEP_DOWN_SEC
         ((COUNTER++))
     fi
 done
 
 if [ "$IS_DOWN" = false ]; then
-    echo ""
-    echo "⚠️ [Step 5a] WARNING: System did not go down after 60 minutes."
+    echo "⚠️ [Phase A] WARNING: System did not go down after 60 minutes."
     exit 1
 fi
 
+# ---------------------------------------------------------------------------
+# Sub-Step 5b: Wait for Network Recovery (IPL Complete)
+# ---------------------------------------------------------------------------
 echo ""
-echo "   -> System is verified down. Now waiting for IPL to complete..."
-echo ""
-
-# -------------------------------------------------------------------------
-# Sub-Step 5b: Wait for Network Recovery
-# -------------------------------------------------------------------------
-echo "   -> Phase B: Polling for PING response (System Coming Online)..."
-
+echo "   -> Phase B: Waiting for IPL to complete (Polling every 5 mins)..."
 COUNTER=0
 PING_SUCCESS=false
 
 while [ $COUNTER -lt $MAX_RETRIES_UP ]; do
-    # Check if Ping succeeds (System Up)
+    # Logic: If Ping SUCCEEDS, the system is UP.
     if ssh -q -i "$VSI_KEY_FILE" \
             -o StrictHostKeyChecking=no \
             -o ConnectTimeout=5 \
@@ -193,32 +200,28 @@ while [ $COUNTER -lt $MAX_RETRIES_UP ]; do
         PING_SUCCESS=true
         break
     else
-        echo "[$(date +%T)] Status: Still Offline... waiting for IPL."
-        sleep $SLEEP_SEC
+        echo "[$(date +%T)] Status: Still Offline... IPL in progress."
+        # Using the longer 5-minute sleep here
+        sleep $SLEEP_UP_SEC
         ((COUNTER++))
     fi
 done
 
 if [ "$PING_SUCCESS" = false ]; then
-    echo ""
-    echo "❌ [Step 5b] Timeout: System failed to respond to PING after 3 hours."
+    echo "❌ [Phase B] Timeout: System failed to respond after 2 hours."
     exit 1
 fi
 
+# ---------------------------------------------------------------------------
+# Sub-Step 5c: Wait for SSH (Application Layer)
+# ---------------------------------------------------------------------------
 echo ""
-
-echo "-------------------------------------------------------------------------"
-echo "Sub-Step 5c: Wait for SSH Service (Application Layer)"
-echo "-------------------------------------------------------------------------"
-echo "   -> Phase C: Polling for SSH Service availability..."
-
+echo "   -> Phase C: Waiting for SSH Service..."
 COUNTER=0
 SSH_SUCCESS=false
 
-# Try for 20 minutes (20 retries * 60 seconds)
-while [ $COUNTER -lt 20 ]; do
-    # FIX: Run SSH directly inside the 'if' statement.
-    # We use 'true' or a simple IBM i command like 'DSPSYSVAL QTIME' to verify the shell is ready.
+while [ $COUNTER -lt $MAX_RETRIES_SSH ]; do
+    # Logic: Try to run a dummy command ('true') via SSH to verify port 22 is ready.
     if ssh -q -i "$VSI_KEY_FILE" \
             -o StrictHostKeyChecking=no \
             -o UserKnownHostsFile=/dev/null \
@@ -229,32 +232,27 @@ while [ $COUNTER -lt 20 ]; do
                  -o UserKnownHostsFile=/dev/null \
                  -o ConnectTimeout=10 \
                  ${SSH_USER}@${IBMI_CLONE_IP} \
-                 'system \"DSPSYSVAL QTIME\"'"; then
+                 'true'"; then
         
         echo ""
-        echo "✓ [$(date +%T)] SSH Successful! System is fully ready."
+        echo "✓ [$(date +%T)] SSH Successful! System is ready."
         SSH_SUCCESS=true
         break
     else
-        # SSH failed (Connection Refused / Timeout).
-        # Because it is inside 'if', the script will NOT crash.
-        echo "[$(date +%T)] Status: Pingable, but SSH not ready yet... waiting."
-        sleep 60
+        echo "[$(date +%T)] Status: Pingable but SSH not ready... waiting."
+        sleep $SLEEP_SSH_SEC
         ((COUNTER++))
     fi
 done
 
 if [ "$SSH_SUCCESS" = false ]; then
-    echo ""
-    echo "❌ [Step 5c] Timeout: System is pingable but SSH service did not start."
+    echo "❌ [Phase C] Timeout: SSH service did not start within 10 minutes."
     exit 1
 fi
 
 echo ""
-echo "✓ [STEP 5] Backup and IPL sequence verified complete."
+echo "✓ [STEP 5] Cycle Complete: System Down -> IPL -> System Up -> SSH Ready."
 echo ""
-
-
 
 
 
