@@ -177,7 +177,7 @@ echo "--------------------------------------------------------------------------
 echo ""
 echo "→ [Step 4] Submitting batch job for: QCLDCSYS01 and QCLDCIPL01..."
 echo "   * This job runs in the Controlling Subsystem (*CTLSBS) to survive network loss."
-echo "   * The SSH connection will drop shortly after submission."
+echo "   * The SSH connection will drop shortly after the SYS01 Control Group backup completes ."
 
 # Initialize variable
 RETVAL=0
