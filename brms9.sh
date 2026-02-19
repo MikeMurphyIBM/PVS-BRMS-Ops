@@ -199,102 +199,139 @@ ssh -q -i "$VSI_KEY_FILE" \
        '${REMOTE_CMD}'" || RETVAL=$?
 
 if [ "$RETVAL" -ne 0 ]; then
-    echo "⚠️ [STEP 4] Submission had an issue (Exit Code $RETVAL)."
+    echo "[STEP 4] Submission had an issue (Exit Code $RETVAL)."
     echo "  If the code is 255, the connection may have dropped early (expected)."
 else
     echo "✓ [STEP 4] Backup Job submitted successfully."
 fi
 echo ""
 
+
 echo "-----------------------------------------------------------------------------"
-echo " STEP 5: Wait for IPL and Network Recovery"
+echo " STEP 5: Monitor System State--Wait for IPL and Network Recovery"
 echo "-----------------------------------------------------------------------------"
-echo ""
+
 echo "→ [Step 5] The system is now backing up and will IPL automatically."
-echo "           Waiting for system to return online..."
+
+# --- Configuration (Standardized) --------------------------
+# We use simple variable names to avoid mismatches
+MAX_RETRIES=60       # 1 hour max wait for down
+IPL_RETRIES=24       # 2 hours max wait for IPL (24 * 5m)
+SSH_RETRIES=20       # 20 attempts for SSH
+
+WAIT_SHORT=180        # 180 seconds (Standard wait)
+WAIT_LONG=300        # 300 seconds (5 minutes for IPL)
+# -----------------------------------------------------------
+
+# Enable debug mode to show exact commands being executed
+#set -x 
+
+echo "   -> Phase A: Waiting for system to go OFFLINE..."
+COUNTER=0
+IS_DOWN=false
+
+while [ $COUNTER -lt $MAX_RETRIES ]; do
+    # Check if Ping FAILS (!). If it fails, system is DOWN.
+    if ! ssh -q -i "$VSI_KEY_FILE" \
+            -o StrictHostKeyChecking=no \
+            -o ConnectTimeout=5 \
+            ${SSH_USER}@${VSI_IP} \
+            "ping -c 1 -W 1 ${IBMI_CLONE_IP} > /dev/null 2>&1"; then
+        
+        echo ""
+        echo "✓ [$(date +%T)] Connection lost! System is OFF-LINE."
+        IS_DOWN=true
+        break
+    else
+        echo "[$(date +%T)] Status: Still Online... waiting."
+        # Using the standardized variable
+        sleep $WAIT_SHORT
+        # Safe increment (works in sh and bash)
+        COUNTER=$((COUNTER + 1))
+    fi
+done
+
+if [ "$IS_DOWN" = false ]; then
+    echo "[Phase A] WARNING: System did not go down after 60 minutes."
+    # We exit here to prevent the job from hanging forever
+    exit 1
+fi
+
 echo ""
+echo "   -> Phase B: Waiting for IPL to complete..."
 
-
-sleep 2700
-# Configuration for Polling
-MAX_RETRIES=18    # 18 attempts * 600 seconds = 3 hours max wait
-SLEEP_SEC=600       # Check every 10 minute
-
-# -------------------------------------------------------------------------
-# Sub-Step 5a: Ping Loop (Wait for TCP/IP Stack)
-# -------------------------------------------------------------------------
-echo "   -> Phase A: Polling for PING response (TCP/IP Interface)..."
 COUNTER=0
 PING_SUCCESS=false
 
-while [ $COUNTER -lt $MAX_RETRIES ]; do
-    # Run Ping from the VSI Jump Host targeting the IBM i Clone
-    ssh -q -i "$VSI_KEY_FILE" \
-        -o StrictHostKeyChecking=no \
-        ${SSH_USER}@${VSI_IP} \
-        "ping -c 1 -W 1 ${IBMI_CLONE_IP} > /dev/null 2>&1"
-    
-    if [ $? -eq 0 ]; then
+while [ $COUNTER -lt $IPL_RETRIES ]; do
+    # Check if Ping SUCCEEDS.
+    if ssh -q -i "$VSI_KEY_FILE" \
+            -o StrictHostKeyChecking=no \
+            -o ConnectTimeout=5 \
+            ${SSH_USER}@${VSI_IP} \
+            "ping -c 1 -W 1 ${IBMI_CLONE_IP} > /dev/null 2>&1"; then
+        
         echo ""
-        echo "✓ [Step 5a] PING Successful! Network interface is up."
+        echo "✓ [$(date +%T)] PING Successful! System is back online."
         PING_SUCCESS=true
         break
     else
-        # Print a dot on the same line to show activity
-        printf "."
-        sleep $SLEEP_SEC
-        ((COUNTER++))
+        echo "[$(date +%T)] Status: Still Offline... IPL in progress."
+        # Using the LONG wait variable (5 mins)
+        sleep $WAIT_LONG
+        COUNTER=$((COUNTER + 1))
     fi
 done
 
 if [ "$PING_SUCCESS" = false ]; then
-    echo ""
-    echo "❌ [Step 5a] Timeout: System failed to respond to PING after 3 hours."
+    echo "[Phase B] Timeout: System failed to respond after 2 hours."
     exit 1
 fi
 
 echo ""
+echo "   -> Phase C: Waiting for SSH Service..."
 
-# -------------------------------------------------------------------------
-# Sub-Step 5b: SSH Loop (Wait for SSHD Service)
-# -------------------------------------------------------------------------
-echo "   -> Phase B: Polling for SSH Service availability..."
 COUNTER=0
 SSH_SUCCESS=false
 
-# We wait a bit longer here (retry 20 times = 20 mins approx) once Ping is up
-while [ $COUNTER -lt 20 ]; do
-    ssh -q -i "$VSI_KEY_FILE" \
-      -o StrictHostKeyChecking=no \
-      -o UserKnownHostsFile=/dev/null \
-      -o ConnectTimeout=10 \
-      ${SSH_USER}@${VSI_IP} \
-      "ssh -q -i /home/${SSH_USER}/.ssh/id_ed25519_vsi \
-           -o StrictHostKeyChecking=no \
-           -o UserKnownHostsFile=/dev/null \
-           -o ConnectTimeout=10 \
-           ${SSH_USER}@${IBMI_CLONE_IP} \
-           'system \"DSPSYSVAL QTIME\"' > /dev/null 2>&1"
-           
-    if [ $? -eq 0 ]; then
-        echo "✓ [Step 5b] SSH Successful! System is ready."
+while [ $COUNTER -lt $SSH_RETRIES ]; do
+    if ssh -q -i "$VSI_KEY_FILE" \
+            -o StrictHostKeyChecking=no \
+            -o UserKnownHostsFile=/dev/null \
+            -o ConnectTimeout=10 \
+            ${SSH_USER}@${VSI_IP} \
+            "ssh -q -i /home/${SSH_USER}/.ssh/id_ed25519_vsi \
+                 -o StrictHostKeyChecking=no \
+                 -o UserKnownHostsFile=/dev/null \
+                 -o ConnectTimeout=10 \
+                 ${SSH_USER}@${IBMI_CLONE_IP} \
+                 'true'"; then
+        
+        echo ""
+        echo "✓ [$(date +%T)] SSH Successful! System is ready."
         SSH_SUCCESS=true
         break
     else
-        echo "      ... SSH not ready yet. Waiting 30s..."
-        sleep 30
-        ((COUNTER++))
+        echo "[$(date +%T)] Status: Pingable but SSH not ready..."
+        sleep $WAIT_SHORT
+        COUNTER=$((COUNTER + 1))
     fi
 done
 
 if [ "$SSH_SUCCESS" = false ]; then
-    echo "❌ [Step 5b] Timeout: System is pingable but SSH service did not start."
+    echo "[Phase C] Timeout: SSH service did not start."
     exit 1
 fi
 
-echo ""
-echo "✓ [STEP 5] Full Backup and IPL sequence completed successfully."
-echo ""
+# Disable debug mode
+#set +x
+
+echo "✓ [STEP 5] Complete."
+
+
+
+sleep 5
+
 
 
 
@@ -325,7 +362,7 @@ ssh -q -i "$VSI_KEY_FILE" \
 
 # Now analyze the captured return code
 if [ "$RETVAL" -ne 0 ]; then
-    echo "⚠️ [STEP 4] Backup completed with exit code $RETVAL."
+    echo "[STEP 4] Backup completed with exit code $RETVAL."
     echo "  (This is expected behavior for Cloud Backups where media transfer happens later)."
 else
     echo "✓ [STEP 4] Backup completed successfully."
@@ -361,7 +398,7 @@ ssh -q -i "$VSI_KEY_FILE" \
 
 # Now check the captured return code safely
 if [ "$RETVAL" -ne 0 ]; then
-  echo "⚠️ [STEP 7] Backup completed with exit code $RETVAL."
+  echo "[STEP 7] Backup completed with exit code $RETVAL."
   echo "  (This is expected behavior for Cloud Backups where media transfer happens later)."
   # Optional: You can proceed safely here.
 else
@@ -389,7 +426,7 @@ ssh -q -i "$VSI_KEY_FILE" \
 }
 
 # Give the subsystem a moment to fully initialize
-sleep 5
+sleep 60
 echo "✓ ICC/COS subsystem start command issued"
 echo ""
 
