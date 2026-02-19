@@ -129,22 +129,6 @@ echo ""
 
 echo ""
 
-echo "-----------------------------------------------------------------------------"
-echo " STEP 5: Monitor System State (Wait for Down -> Wait for Up)"
-echo "-----------------------------------------------------------------------------"
-echo ""
-echo "→ [Step 5] The backup job is running."
-echo "           We must wait for the system to go OFFLINE (Restricted State)"
-echo "           and then wait for it to come back ONLINE (IPL Complete)."
-echo ""
-
-# Configuration
-# Max wait for system to GO DOWN (e.g., 60 mins for SYS group to finish)
-MAX_RETRIES_DOWN=12 
-# Max wait for system to COME UP (e.g., 3 hours for IPL group + Reboot)
-MAX_RETRIES_UP=30  
-SLEEP_SEC=300        # Check every 300 seconds
-
 echo "------------------------------------------------------------------------"
 echo "Sub-Step 5a: Wait for Network Drop (Confirm Restricted State)"
 echo "------------------------------------------------------------------------"
@@ -153,21 +137,23 @@ COUNTER=0
 IS_DOWN=false
 
 while [ $COUNTER -lt $MAX_RETRIES_DOWN ]; do
-    # Ping the IBM i. We want this to FAIL.
-    ssh -q -i "$VSI_KEY_FILE" \
-        -o StrictHostKeyChecking=no \
-        ${SSH_USER}@${VSI_IP} \
-        "ping -c 1 -W 1 ${IBMI_CLONE_IP} > /dev/null 2>&1"
-    
-    # Capture exit code: 0 = Success (Up), Non-Zero = Failure (Down)
-    if [ $? -ne 0 ]; then
+    # FIX: Run the command directly inside the 'if' condition.
+    # The '!' means "if this command fails". This prevents 'set -e' from killing the script.
+    if ! ssh -q -i "$VSI_KEY_FILE" \
+            -o StrictHostKeyChecking=no \
+            -o ConnectTimeout=5 \
+            ${SSH_USER}@${VSI_IP} \
+            "ping -c 1 -W 1 ${IBMI_CLONE_IP} > /dev/null 2>&1"; then
+        
+        # If we are here, the ping FAILED (Exit Code != 0), so the system is DOWN.
         echo ""
         echo "✓ [Step 5a] Connection lost! System has entered restricted state."
         IS_DOWN=true
         break
     else
-        # System is still up, print dot and wait
-        printf "Still Online"
+        # If we are here, the ping SUCCEEDED, so the system is still UP.
+        # We use $(date) to force a change in output, helping bypass log buffering.
+        echo "[$(date +%T)] Status: Still Online... waiting for restricted state."
         sleep $SLEEP_SEC
         ((COUNTER++))
     fi
@@ -194,19 +180,21 @@ COUNTER=0
 PING_SUCCESS=false
 
 while [ $COUNTER -lt $MAX_RETRIES_UP ]; do
-    # Ping the IBM i. Now we want this to SUCCEED.
-    ssh -q -i "$VSI_KEY_FILE" \
-        -o StrictHostKeyChecking=no \
-        ${SSH_USER}@${VSI_IP} \
-        "ping -c 1 -W 1 ${IBMI_CLONE_IP} > /dev/null 2>&1"
-    
-    if [ $? -eq 0 ]; then
+    # FIX: Run command directly in 'if'. 
+    # If ping succeeds (Exit Code 0), we enter the 'then' block.
+    # If ping fails (Exit Code != 0), we enter the 'else' block (without crashing).
+    if ssh -q -i "$VSI_KEY_FILE" \
+            -o StrictHostKeyChecking=no \
+            -o ConnectTimeout=5 \
+            ${SSH_USER}@${VSI_IP} \
+            "ping -c 1 -W 1 ${IBMI_CLONE_IP} > /dev/null 2>&1"; then
+        
         echo ""
         echo "✓ [Step 5b] PING Successful! System is back online."
         PING_SUCCESS=true
         break
     else
-        printf "Still Offline"
+        echo "[$(date +%T)] Status: Still Offline... waiting for IPL."
         sleep $SLEEP_SEC
         ((COUNTER++))
     fi
@@ -217,46 +205,54 @@ if [ "$PING_SUCCESS" = false ]; then
     echo "❌ [Step 5b] Timeout: System failed to respond to PING after 3 hours."
     exit 1
 fi
-
 echo ""
 
 echo "-------------------------------------------------------------------------"
-echo "Sub-Step 5c: SSH Loop (Wait for SSHD Service)"
+echo "Sub-Step 5c: Wait for SSH Service (Application Layer)"
 echo "-------------------------------------------------------------------------"
 echo "   -> Phase C: Polling for SSH Service availability..."
 
 COUNTER=0
 SSH_SUCCESS=false
 
-# We wait a bit longer here (retry 20 times = 20 mins approx) once Ping is up
+# Try for 20 minutes (20 retries * 60 seconds)
 while [ $COUNTER -lt 20 ]; do
-    ssh -q -i "$VSI_KEY_FILE" \
-      -o StrictHostKeyChecking=no \
-      -o UserKnownHostsFile=/dev/null \
-      -o ConnectTimeout=10 \
-      ${SSH_USER}@${VSI_IP} \
-      "ssh -q -i /home/${SSH_USER}/.ssh/id_ed25519_vsi \
-           -o StrictHostKeyChecking=no \
-           -o UserKnownHostsFile=/dev/null \
-           -o ConnectTimeout=10 \
-           ${SSH_USER}@${IBMI_CLONE_IP} \
-           'system \"DSPSYSVAL QTIME\"' > /dev/null 2>&1"
-           
-    if [ $? -eq 0 ]; then
-        echo "✓ [Step 5b] SSH Successful! System is ready."
+    # FIX: Run SSH directly inside the 'if' statement.
+    # We use 'true' or a simple IBM i command like 'DSPSYSVAL QTIME' to verify the shell is ready.
+    if ssh -q -i "$VSI_KEY_FILE" \
+            -o StrictHostKeyChecking=no \
+            -o UserKnownHostsFile=/dev/null \
+            -o ConnectTimeout=10 \
+            ${SSH_USER}@${VSI_IP} \
+            "ssh -q -i /home/${SSH_USER}/.ssh/id_ed25519_vsi \
+                 -o StrictHostKeyChecking=no \
+                 -o UserKnownHostsFile=/dev/null \
+                 -o ConnectTimeout=10 \
+                 ${SSH_USER}@${IBMI_CLONE_IP} \
+                 'system \"DSPSYSVAL QTIME\"'"; then
+        
+        echo ""
+        echo "✓ [$(date +%T)] SSH Successful! System is fully ready."
         SSH_SUCCESS=true
         break
     else
-        echo "      ... SSH not ready yet. Waiting 30s..."
-        sleep 30
+        # SSH failed (Connection Refused / Timeout).
+        # Because it is inside 'if', the script will NOT crash.
+        echo "[$(date +%T)] Status: Pingable, but SSH not ready yet... waiting."
+        sleep 60
         ((COUNTER++))
     fi
 done
 
 if [ "$SSH_SUCCESS" = false ]; then
+    echo ""
     echo "❌ [Step 5c] Timeout: System is pingable but SSH service did not start."
     exit 1
 fi
+
+echo ""
+echo "✓ [STEP 5] Backup and IPL sequence verified complete."
+echo ""
 
 
 
