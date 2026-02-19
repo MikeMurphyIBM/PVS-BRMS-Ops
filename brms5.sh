@@ -258,47 +258,6 @@ echo ""
 
 sleep 5
 
-# ------------------------------------------------------------------------------
-# JOB SUMMARY
-# ------------------------------------------------------------------------------
-# Ensure variable exists to prevent 'unbound variable' errors
-FOUND_FILES=${FOUND_FILES:-""}
-
-echo "========================================================================"
-echo "              BRMS FLASHCOPY BACKUP JOB COMPLETION REPORT"
-echo "========================================================================"
-echo ""
-echo "1. BRMS FLASHCOPY STATE:"
-echo "   Source LPAR: *ENDPRC (Process Complete)"
-echo "   Clone LPAR:  *ENDBKU (Backup Complete)"
-echo ""
-echo "2. CONTROL GROUPS PROCESSED:"
-echo "   - QCLDBUSR01 (User Data)"
-echo "   - QCLDBGRP01 (Group Data)"
-echo ""
-echo "3. CLOUD TRANSFER DETAILS:"
-echo "   ✓ Cloud Object Storage transfer successful."
-echo "   ✓ Target Bucket: s3://${COS_BUCKET}"
-echo ""
-echo "   [Uploaded Backup Volumes]"
-echo "   ---------------------------------------------------"
-# Simplified logic: Prints the files if they exist, or the default message if empty.
-echo "${FOUND_FILES:-   (No volume names captured in polling variable)}"
-echo "   ---------------------------------------------------"
-echo ""
-echo "4. HISTORY SYNCHRONIZATION:"
-echo "   ✓ QUSRBRM downloaded from COS to Source."
-echo "   ✓ Restored to temporary library ${SAVF_LIB}."
-echo "   ✓ History merged into active BRMS database."
-echo ""
-echo "5. CLEANUP:"
-echo "   ✓ Temporary resources removed from Source and Clone."
-echo ""
-echo "========================================================================"
-echo "  ✓ All BRMS FlashCopy operations completed successfully"
-echo "  ✓ Backup history synchronized between LPARs"
-echo "  ✓ Production system ready for normal operations"
-echo "========================================================================"
 
 # CRITICAL FIX: Wait for logs to flush to the console before exiting
 echo "Finalizing job logs..."
