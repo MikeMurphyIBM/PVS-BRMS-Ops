@@ -546,6 +546,29 @@ echo ""
 echo "✓ Library and save file created on source LPAR"
 echo ""
 
+echo ""
+echo ""
+echo "STEP 9b:  Updating ICC Resource Credentials on Source LPAR..."
+echo ""
+
+# Updating S3 ICC COS Credentials...
+# WRAPPED IN SSH TO EXECUTE ON THE SOURCE LPAR
+ssh -q -i "$VSI_KEY_FILE" \
+  -o StrictHostKeyChecking=no \
+  -o UserKnownHostsFile=/dev/null \
+  ${SSH_USER}@${VSI_IP} \
+  "ssh -q -i /home/${SSH_USER}/.ssh/id_ed25519_vsi \
+       -o StrictHostKeyChecking=no \
+       -o UserKnownHostsFile=/dev/null \
+       ${SSH_USER}@${IBMI_SOURCE_IP} \
+       \"system \\\"CHGS3RICC RSCNM(${CLOUD_RESOURCE}) RSCDSC(BACKUPS_FOR_PVS) KEYID('${ACCESS_KEY}') SECRETKEY('${SECRET_KEY}')\\\"\""
+if [ $? -ne 0 ]; then
+  echo "Critical Error: Failed to update credentials on source. Aborting."
+  exit 1
+fi
+echo "Source LPAR ICC Credentials updated successfully."
+echo ""
+
 echo "-----------------------------------------------------------------------------"
 echo " STEP 10: Download BRMS History File from COS to the Source LPAR"
 echo "-----------------------------------------------------------------------------"
