@@ -148,6 +148,7 @@ echo "✓ Library and save file created on source LPAR"
 echo ""
 
 echo ""
+echo ""
 echo "STEP 9b:  Updating ICC Resource Credentials on Source LPAR..."
 echo ""
 
@@ -186,8 +187,9 @@ ssh -q -i "$VSI_KEY_FILE" \
        -o StrictHostKeyChecking=no \
        -o UserKnownHostsFile=/dev/null \
        ${SSH_USER}@${IBMI_SOURCE_IP} \
-       'PATH=/QOpenSys/pkgs/bin:\$PATH; export PATH; \
-        AWS_ACCESS_KEY_ID=${ACCESS_KEY} AWS_SECRET_ACCESS_KEY=${SECRET_KEY} \
+       'PATH=/QOpenSys/pkgs/bin:/QOpenSys/usr/bin:\$PATH; export PATH; \
+        export AWS_ACCESS_KEY_ID=\"${ACCESS_KEY}\"; \
+        export AWS_SECRET_ACCESS_KEY=\"${SECRET_KEY}\"; \
         aws --endpoint-url=${COS_ENDPOINT} s3 cp s3://${COS_BUCKET}/${COS_FILE} /tmp/${COS_FILE}'" || {
     echo "✗ ERROR: Failed to download from COS"
     exit 1
@@ -196,7 +198,6 @@ ssh -q -i "$VSI_KEY_FILE" \
 echo ""
 echo "✓ History file downloaded to /tmp/${COS_FILE}"
 echo ""
-
 
 echo "-----------------------------------------------------------------------------"
 echo " STEP 11:  Copy Stream File to Save File"
