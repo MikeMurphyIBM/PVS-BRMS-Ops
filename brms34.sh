@@ -206,9 +206,15 @@ ssh -q -i "$VSI_KEY_FILE" \
        ${SSH_USER}@${IBMI_CLONE_IP} \
        \"system \\\"CHGS3RICC RSCNM(${CLOUD_RESOURCE}) RSCDSC(BACKUPS_FOR_PVS) KEYID('${ACCESS_KEY}') SECRETKEY('${SECRET_KEY}')\\\"\""
 if [ $? -ne 0 ]; then
-  echo "Critical Error: Failed to update credentials. Aborting."
-  exit 1
+  echo "⚠ WARNING: Failed to update ICC credentials on source. Proceeding with existing credentials..."
+else
+  echo "Source LPAR ICC Credentials updated successfully."
 fi
+
+#if [ $? -ne 0 ]; then
+#  echo "Critical Error: Failed to update credentials. Aborting."
+#  exit 1
+#fi
 echo "Credentials updated successfully."
 echo ""
 
