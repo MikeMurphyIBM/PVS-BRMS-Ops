@@ -142,227 +142,31 @@ echo ""
 
 
 
-echo "-----------------------------------------------------------------------------"
-echo " STEP 9: Wait for Cloud Object Storage (COS) Upload to Complete"
-echo "-----------------------------------------------------------------------------"
-echo "   -> Polling IBM i to check for volumes in Transfer (*TRF) state..."
-
-# --- Configuration for Transfer Polling ---
-# Wait up to 6 hours (72 * 5 mins) to accommodate large full system saves
-MAX_RETRIES_TRF=72   
-SLEEP_TRF_SEC=300    
-# ------------------------------------------
-
-COUNTER=0
-TRANSFER_COMPLETE=false
-
-while [ $COUNTER -lt $MAX_RETRIES_TRF ]; do
-    # Run WRKMEDBRM TYPE(*TRF) to check if any volumes are still transferring.
-    # If it returns BRM1134, CPF9861, (No volumes found), or is empty, the transfer queue is clear.
-    TRF_CHECK=$(ssh -q -i "$VSI_KEY_FILE" $SSH_OPTS \
-    ${SSH_USER}@${VSI_IP} \
-    "ssh -q -i /home/${SSH_USER}/.ssh/id_ed25519_vsi $SSH_OPTS \
-         ${SSH_USER}@${IBMI_CLONE_IP} \
-         'system \"WRKMEDBRM TYPE(*TRF) OUTPUT(*PRINT)\"' 2>&1" || true)
-
-    # ---> UPDATED IF STATEMENT BELOW <---
-    if [[ "$TRF_CHECK" == *"BRM1134"* ]] || [[ "$TRF_CHECK" == *"CPF9861"* ]] || [[ "$TRF_CHECK" == *"(No volumes found)"* ]] || [[ -z "$TRF_CHECK" ]]; then
-        echo ""
-        echo "✓ [$(date +%T)] Transfer Complete! No volumes remaining in *TRF state."
-        TRANSFER_COMPLETE=true
-        break
-    else
-        echo "[$(date +%T)] Status: Upload in progress. Volumes are still in *TRF state..."
-        sleep $SLEEP_TRF_SEC
-        COUNTER=$((COUNTER + 1))
-    fi
-done
-
-if [ "$TRANSFER_COMPLETE" = false ]; then
-    echo "❌ [Step 9] Timeout: Cloud upload did not complete within 6 hours."
-    exit 1
-fi
-
-
-
-# ------------------------------------------------------------------------------
-# Sub-Step: Populate FOUND_FILES for the Job Summary Report
-# ------------------------------------------------------------------------------
-echo ""
-echo "   -> Retrieving list of uploaded files for the job summary..."
-
-BRMS_DIR="QBRMS_MURPHYXP"
-CHECK_CMD="PATH=/QOpenSys/pkgs/bin:/QOpenSys/usr/bin:\$PATH; export PATH; \
-           aws --endpoint-url=${COS_ENDPOINT} s3 ls s3://${COS_BUCKET}/${BRMS_DIR}/ | \
-           grep \`date +%Y-%m-%d\` | \
-           awk '{print \$4}'"
-
-FOUND_FILES=$(ssh -q -i "$VSI_KEY_FILE" $SSH_OPTS ${SSH_USER}@${VSI_IP} \
-   "ssh -q -i /home/${SSH_USER}/.ssh/id_ed25519_vsi $SSH_OPTS ${SSH_USER}@${IBMI_CLONE_IP} \
-   \"$CHECK_CMD\"") || true
-
-echo "✓ SUCCESS: BRMS backup volumes safely transferred to cloud."
-echo "---------------------------------------------------"
-echo "$FOUND_FILES"
-echo "---------------------------------------------------"
-echo ""
-
-echo ""
-echo "-----------------------------------------------------------------------------"
-echo " STEP 7b: Run BRMS Maintenance to inform directory of successful transfer"
-echo "------------------------------------------------------------------------------"
-echo ""
-
-echo "→ [STEP 7b] Running BRMS Maintenance..."
-
-# Initialize variable
-RETVAL=0
-
-# Run Maintenance. Use '|| RETVAL=$?' to catch non-zero exit codes.
-ssh -q -i "$VSI_KEY_FILE" \
-  -o StrictHostKeyChecking=no \
-  -o UserKnownHostsFile=/dev/null \
-  -o ServerAliveInterval=60 \
-  -o ServerAliveCountMax=120 \
-  ${SSH_USER}@${VSI_IP} \
-  "ssh -q -i /home/${SSH_USER}/.ssh/id_ed25519_vsi \
-       -o StrictHostKeyChecking=no \
-       -o UserKnownHostsFile=/dev/null \
-       -o ServerAliveInterval=60 \
-       -o ServerAliveCountMax=120 \
-       ${SSH_USER}@${IBMI_CLONE_IP} \
-       'system \"STRMNTBRM MOVMED(*YES) RUNCLNUP(*YES) PRTRCYRPT(*ALL)\"'" || RETVAL=$?
-
-# Check the code. 
-# Note: Code 0 is success. 
-if [ "$RETVAL" -ne 0 ]; then
-    echo "⚠️ [STEP 6] Maintenance completed with exit code $RETVAL."
-    echo "  (This is common for STRMNTBRM if there were minor warnings or locked files)."
-    echo "  Proceeding to finalization..."
-else
-    echo "✓ [STEP 7b] Maintenance completed successfully."
-fi
-
-echo ""
-echo "-----------------------------------------------------------------------------"
-echo " STEP 8: BRMS Flashcopy status change and QUSRBRM file history saved"
-echo "------------------------------------------------------------------------------"
-echo ""
-echo "→ [STEP 8] Finalizing BRMS FlashCopy state and saving QUSRBRM history..."
-
-# 8a. Update BRMS State to *ENDBKU
-# This tells BRMS the backup is finished so the history is marked complete.
-echo "  [Step 8] Setting BRMS state to *ENDBKU..."
-ssh -q -i "$VSI_KEY_FILE" $SSH_OPTS ${SSH_USER}@${VSI_IP} \
-   "ssh -q -i /home/${SSH_USER}/.ssh/id_ed25519_vsi $SSH_OPTS ${SSH_USER}@${IBMI_CLONE_IP} \
-   'system \"INZBRM OPTION(*FLASHCOPY) STATE(*ENDBKU)\"'" || {
-   echo "✗ FAILURE: Could not set BRMS state to *ENDBKU."
-   exit 1
-}
-
-# 8b. Prepare Scratch Library (CLDSTGTMP)
-# We use '|| true' on DLTLIB so the script doesn't fail if the library doesn't exist yet.
-echo "  [8b] preparing temporary library CLDSTGTMP..."
-ssh -q -i "$VSI_KEY_FILE" $SSH_OPTS ${SSH_USER}@${VSI_IP} \
-   "ssh -q -i /home/${SSH_USER}/.ssh/id_ed25519_vsi $SSH_OPTS ${SSH_USER}@${IBMI_CLONE_IP} \
-   'system \"DLTLIB LIB(CLDSTGTMP)\" > /dev/null 2>&1 || true; \
-    system \"CRTLIB LIB(CLDSTGTMP)\"; \
-    system \"CRTSAVF FILE(CLDSTGTMP/CLNHIST)\"'" || {
-   echo "✗ FAILURE: Could not create temporary library or save file."
-   exit 1
-}
-
-# 8c. Save QUSRBRM to the Save File
-# We omit journals to save space/time as they aren't strictly needed for history merging.
-echo "  [8c] Saving QUSRBRM to save file..."
-ssh -q -i "$VSI_KEY_FILE" $SSH_OPTS ${SSH_USER}@${VSI_IP} \
-   "ssh -q -i /home/${SSH_USER}/.ssh/id_ed25519_vsi $SSH_OPTS ${SSH_USER}@${IBMI_CLONE_IP} \
-   'system \"SAVLIB LIB(QUSRBRM) DEV(*SAVF) SAVF(CLDSTGTMP/CLNHIST) OMITOBJ((*ALL *JRN) (*ALL *JRNRCV))\"'" || {
-   echo "✗ FAILURE: Could not save QUSRBRM library."
-   exit 1
-}
-
-# 8d. Upload the Save File to Cloud Object Storage
-# We use the specific PATH export required for the PASE shell.
-echo "  [8d] Uploading QUSRBRM save file to COS..."
-UPLOAD_CMD="PATH=/QOpenSys/pkgs/bin:\$PATH; export PATH; \
-            cat /qsys.lib/cldstgtmp.lib/clnhist.file | \
-            aws --endpoint-url=${COS_ENDPOINT} s3 cp - s3://${COS_BUCKET}/clnhist.file"
-
-if ssh -q -i "$VSI_KEY_FILE" $SSH_OPTS ${SSH_USER}@${VSI_IP} \
-   "ssh -q -i /home/${SSH_USER}/.ssh/id_ed25519_vsi $SSH_OPTS ${SSH_USER}@${IBMI_CLONE_IP} \
-   \"$UPLOAD_CMD\""; then
-    echo "✓ SUCCESS: QUSRBRM history uploaded successfully."
-else
-    echo "✗ FAILURE: Could not upload QUSRBRM to Cloud Object Storage."
-    exit 1
-fi
-echo ""
-
-################################################################################
-# SOURCE LPAR OPERATIONS
-################################################################################
-echo "========================================================================"
-echo " SOURCE LPAR: DOWNLOAD & MERGE OPERATIONS"
-echo " Target: ${IBMI_SOURCE_IP}"
-echo "========================================================================"
-echo ""
-
-echo "-----------------------------------------------------------------------------"
-echo " STEP 9: Create Library and Save File on Source LPAR"
-echo "-----------------------------------------------------------------------------"
-echo ""
-echo "→ [STEP 9] Creating library ${SAVF_LIB}..."
-
-# 1. Create the Library (Ignore failure if it already exists)
-ssh -q -i "$VSI_KEY_FILE" \
-  -o StrictHostKeyChecking=no \
-  -o UserKnownHostsFile=/dev/null \
-  ${SSH_USER}@${VSI_IP} \
-  "ssh -q -i /home/${SSH_USER}/.ssh/id_ed25519_vsi \
-       -o StrictHostKeyChecking=no \
-       -o UserKnownHostsFile=/dev/null \
-       ${SSH_USER}@${IBMI_SOURCE_IP} \
-       'system \"CRTLIB LIB(${SAVF_LIB})\"'" || {
-    echo "⚠ WARNING: Library ${SAVF_LIB} exists or could not be created. Proceeding..."
-}
-
-echo "→ [STEP 9] Preparing Save File (Delete old version if exists)..."
-
-# 2. Delete the old Save File (Ignore failure if file doesn't exist)
-# We accept failure here (|| true) because it's okay if the file isn't there to delete.
-ssh -q -i "$VSI_KEY_FILE" \
-  -o StrictHostKeyChecking=no \
-  -o UserKnownHostsFile=/dev/null \
-  ${SSH_USER}@${VSI_IP} \
-  "ssh -q -i /home/${SSH_USER}/.ssh/id_ed25519_vsi \
-       -o StrictHostKeyChecking=no \
-       -o UserKnownHostsFile=/dev/null \
-       ${SSH_USER}@${IBMI_SOURCE_IP} \
-       'system \"DLTF FILE(${SAVF_LIB}/${SAVF_NAME})\"'" || true
-
-# 3. Wait briefly to ensure the object lock is released
-echo "→ [STEP 9] Waiting 5 seconds for system cleanup..."
-sleep 5
-
-echo "→ [STEP 9] Creating new Save File..."
-
-# 4. Create the new Save File (This must succeed)
-ssh -q -i "$VSI_KEY_FILE" \
-  -o StrictHostKeyChecking=no \
-  -o UserKnownHostsFile=/dev/null \
-  ${SSH_USER}@${VSI_IP} \
-  "ssh -q -i /home/${SSH_USER}/.ssh/id_ed25519_vsi \
-       -o StrictHostKeyChecking=no \
-       -o UserKnownHostsFile=/dev/null \
-       ${SSH_USER}@${IBMI_SOURCE_IP} \
-       'system \"CRTSAVF FILE(${SAVF_LIB}/${SAVF_NAME})\"'" || {
-    echo "✗ ERROR: Failed to create save file ${SAVF_LIB}/${SAVF_NAME} on source"
-    exit 1
-}
 
 echo ""
 echo "✓ Library and save file created on source LPAR"
+echo ""
+
+echo ""
+echo "STEP 9b:  Updating ICC Resource Credentials on Source LPAR..."
+echo ""
+
+# Updating S3 ICC COS Credentials...
+# WRAPPED IN SSH TO EXECUTE ON THE SOURCE LPAR
+ssh -q -i "$VSI_KEY_FILE" \
+  -o StrictHostKeyChecking=no \
+  -o UserKnownHostsFile=/dev/null \
+  ${SSH_USER}@${VSI_IP} \
+  "ssh -q -i /home/${SSH_USER}/.ssh/id_ed25519_vsi \
+       -o StrictHostKeyChecking=no \
+       -o UserKnownHostsFile=/dev/null \
+       ${SSH_USER}@${IBMI_SOURCE_IP} \
+       \"system \\\"CHGS3RICC RSCNM(${CLOUD_RESOURCE}) RSCDSC(BACKUPS_FOR_PVS) KEYID('${ACCESS_KEY}') SECRETKEY('${SECRET_KEY}')\\\"\""
+if [ $? -ne 0 ]; then
+  echo "Critical Error: Failed to update credentials on source. Aborting."
+  exit 1
+fi
+echo "Source LPAR ICC Credentials updated successfully."
 echo ""
 
 echo "-----------------------------------------------------------------------------"
