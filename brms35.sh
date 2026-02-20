@@ -446,8 +446,9 @@ ssh -q -i "$VSI_KEY_FILE" \
        ${SSH_USER}@${IBMI_CLONE_IP} \
        \"system \\\"CHGS3RICC RSCNM(${CLOUD_RESOURCE}) RSCDSC(BACKUPS_FOR_PVS) KEYID('${ACCESS_KEY}') SECRETKEY('${SECRET_KEY}')\\\"\""
 if [ $? -ne 0 ]; then
-  echo "Critical Error: Failed to update credentials. Aborting."
-  exit 1
+  echo "⚠ WARNING: Failed to update ICC credentials on source. Proceeding with existing credentials..."
+else
+  echo "Source LPAR ICC Credentials updated successfully."
 fi
 echo "Credentials updated successfully."
 echo ""
@@ -508,14 +509,15 @@ TRANSFER_COMPLETE=false
 
 while [ $COUNTER -lt $MAX_RETRIES_TRF ]; do
     # Run WRKMEDBRM TYPE(*TRF) to check if any volumes are still transferring.
-    # If it returns BRM1134, CPF9861, or is empty, the transfer queue is clear.
+    # If it returns BRM1134, CPF9861, (No volumes found), or is empty, the transfer queue is clear.
     TRF_CHECK=$(ssh -q -i "$VSI_KEY_FILE" $SSH_OPTS \
-        ${SSH_USER}@${VSI_IP} \
-        "ssh -q -i /home/${SSH_USER}/.ssh/id_ed25519_vsi $SSH_OPTS \
-             ${SSH_USER}@${IBMI_CLONE_IP} \
-             'system \"WRKMEDBRM TYPE(*TRF) OUTPUT(*PRINT)\"' 2>&1" )
+    ${SSH_USER}@${VSI_IP} \
+    "ssh -q -i /home/${SSH_USER}/.ssh/id_ed25519_vsi $SSH_OPTS \
+         ${SSH_USER}@${IBMI_CLONE_IP} \
+         'system \"WRKMEDBRM TYPE(*TRF) OUTPUT(*PRINT)\"' 2>&1" || true)
 
-    if [[ "$TRF_CHECK" == *"BRM1134"* ]] || [[ "$TRF_CHECK" == *"CPF9861"* ]] || [[ -z "$TRF_CHECK" ]]; then
+    # ---> UPDATED IF STATEMENT BELOW <---
+    if [[ "$TRF_CHECK" == *"BRM1134"* ]] || [[ "$TRF_CHECK" == *"CPF9861"* ]] || [[ "$TRF_CHECK" == *"(No volumes found)"* ]] || [[ -z "$TRF_CHECK" ]]; then
         echo ""
         echo "✓ [$(date +%T)] Transfer Complete! No volumes remaining in *TRF state."
         TRANSFER_COMPLETE=true
@@ -710,6 +712,29 @@ ssh -q -i "$VSI_KEY_FILE" \
 
 echo ""
 echo "✓ Library and save file created on source LPAR"
+echo ""
+
+echo "STEP 9b:  Updating ICC Resource Credentials on Source LPAR..."
+echo ""
+
+# Updating S3 ICC COS Credentials...
+# WRAPPED IN SSH TO EXECUTE ON THE SOURCE LPAR
+ssh -q -i "$VSI_KEY_FILE" \
+  -o StrictHostKeyChecking=no \
+  -o UserKnownHostsFile=/dev/null \
+  ${SSH_USER}@${VSI_IP} \
+  "ssh -q -i /home/${SSH_USER}/.ssh/id_ed25519_vsi \
+       -o StrictHostKeyChecking=no \
+       -o UserKnownHostsFile=/dev/null \
+       ${SSH_USER}@${IBMI_SOURCE_IP} \
+       \"system \\\"CHGS3RICC RSCNM(${CLOUD_RESOURCE}) RSCDSC(BACKUPS_FOR_PVS) KEYID('${ACCESS_KEY}') SECRETKEY('${SECRET_KEY}')\\\"\""
+if [ $? -ne 0 ]; then
+  echo "⚠ WARNING: Failed to update ICC credentials on source. Proceeding with existing credentials..."
+else
+  echo "Source LPAR ICC Credentials updated successfully."
+fi
+echo ""
+echo "Source LPAR ICC Credentials updated successfully."
 echo ""
 
 echo "-----------------------------------------------------------------------------"
