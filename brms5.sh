@@ -158,14 +158,15 @@ TRANSFER_COMPLETE=false
 
 while [ $COUNTER -lt $MAX_RETRIES_TRF ]; do
     # Run WRKMEDBRM TYPE(*TRF) to check if any volumes are still transferring.
-    # If it returns BRM1134, CPF9861, or is empty, the transfer queue is clear.
+    # If it returns BRM1134, CPF9861, (No volumes found), or is empty, the transfer queue is clear.
     TRF_CHECK=$(ssh -q -i "$VSI_KEY_FILE" $SSH_OPTS \
     ${SSH_USER}@${VSI_IP} \
     "ssh -q -i /home/${SSH_USER}/.ssh/id_ed25519_vsi $SSH_OPTS \
          ${SSH_USER}@${IBMI_CLONE_IP} \
          'system \"WRKMEDBRM TYPE(*TRF) OUTPUT(*PRINT)\"' 2>&1" || true)
 
-    if [[ "$TRF_CHECK" == *"BRM1134"* ]] || [[ "$TRF_CHECK" == *"CPF9861"* ]] || [[ -z "$TRF_CHECK" ]]; then
+    # ---> UPDATED IF STATEMENT BELOW <---
+    if [[ "$TRF_CHECK" == *"BRM1134"* ]] || [[ "$TRF_CHECK" == *"CPF9861"* ]] || [[ "$TRF_CHECK" == *"(No volumes found)"* ]] || [[ -z "$TRF_CHECK" ]]; then
         echo ""
         echo "✓ [$(date +%T)] Transfer Complete! No volumes remaining in *TRF state."
         TRANSFER_COMPLETE=true
@@ -181,6 +182,8 @@ if [ "$TRANSFER_COMPLETE" = false ]; then
     echo "❌ [Step 9] Timeout: Cloud upload did not complete within 6 hours."
     exit 1
 fi
+
+
 
 # ------------------------------------------------------------------------------
 # Sub-Step: Populate FOUND_FILES for the Job Summary Report
