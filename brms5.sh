@@ -187,9 +187,7 @@ ssh -q -i "$VSI_KEY_FILE" \
        -o StrictHostKeyChecking=no \
        -o UserKnownHostsFile=/dev/null \
        ${SSH_USER}@${IBMI_SOURCE_IP} \
-       'PATH=/QOpenSys/pkgs/bin:/QOpenSys/usr/bin:\$PATH; export PATH; \
-        export AWS_ACCESS_KEY_ID=\"${ACCESS_KEY}\"; \
-        export AWS_SECRET_ACCESS_KEY=\"${SECRET_KEY}\"; \
+       'PATH=/QOpenSys/pkgs/bin:\$PATH; export PATH; \
         aws --endpoint-url=${COS_ENDPOINT} s3 cp s3://${COS_BUCKET}/${COS_FILE} /tmp/${COS_FILE}'" || {
     echo "✗ ERROR: Failed to download from COS"
     exit 1
